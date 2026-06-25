@@ -60,6 +60,7 @@ export type PlanExercise = {
   target_weight: number | null
   unit: string
   cue: string | null
+  technique: string | null
   sort_order: number
 }
 

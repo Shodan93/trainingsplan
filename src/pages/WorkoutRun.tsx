@@ -49,6 +49,10 @@ export default function WorkoutRun() {
   const celebrated = useRef<Set<string>>(new Set())
   const progressed = useRef<Set<string>>(new Set())
 
+  // Gesamt-Dauer der Session
+  const [elapsed, setElapsed] = useState(0)
+  const [showTech, setShowTech] = useState(false)
+
   // Post-Workout-Tagebuch
   const [mood, setMood] = useState<number | null>(null)
   const [diaryText, setDiaryText] = useState('')
@@ -137,6 +141,18 @@ export default function WorkoutRun() {
       wakeRef.current = null
     }
   }, [])
+
+  useEffect(() => { setShowTech(false) }, [idx])
+
+  // Gesamt-Timer ab Session-Start
+  useEffect(() => {
+    if (!session) return
+    const start = new Date(session.started_at).getTime()
+    const upd = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
+    upd()
+    const id = window.setInterval(upd, 1000)
+    return () => clearInterval(id)
+  }, [session])
 
   function startRest() { firedRef.current = false; setRestEndAt(Date.now() + restTotal * 1000) }
   function stopRest() { setRestEndAt(null); setRestLeft(null) }
@@ -298,8 +314,13 @@ export default function WorkoutRun() {
       {/* Header */}
       <header className="pt-safe px-4 pt-3 pb-2 sticky top-0 bg-bg/95 backdrop-blur z-10 border-b border-white/5">
         <div className="flex items-center justify-between mb-2">
-          <button className="btn-ghost !px-3 !py-1.5 text-sm" onClick={cancel}>✕ Abbrechen</button>
-          <span className="text-sm text-white/50">{session?.day_title}</span>
+          <button className="btn-ghost !px-3 !py-1.5 text-sm" onClick={cancel}>✕</button>
+          <div className="text-center min-w-0 px-2">
+            <p className="text-[11px] text-white/45 truncate">{session?.day_title}</p>
+            <p className="text-base font-bold tabular-nums leading-none">
+              ⏱ {Math.floor(elapsed / 3600) > 0 ? `${Math.floor(elapsed / 3600)}:` : ''}{String(Math.floor((elapsed % 3600) / 60)).padStart(Math.floor(elapsed / 3600) > 0 ? 2 : 1, '0')}:{String(elapsed % 60).padStart(2, '0')}
+            </p>
+          </div>
           <button className="btn-accent !px-3 !py-1.5 text-sm" onClick={finish}>Fertig ✓</button>
         </div>
         <div className="flex items-center gap-2">
@@ -323,6 +344,18 @@ export default function WorkoutRun() {
           <div className="mt-3 text-sm bg-danger/10 border border-danger/20 rounded-xl p-3 text-red-200/90">⚠️ {ex.cue}</div>
         )}
         {!ex.is_warning && ex.cue && <p className="text-sm text-white/45 mt-2 leading-snug">💬 {ex.cue}</p>}
+
+        {ex.technique && (
+          <div className="mt-3">
+            <button className="btn-ghost w-full !justify-between text-sm" onClick={() => setShowTech(s => !s)}>
+              <span>ℹ️ Ausführung im Detail</span>
+              <span className={cls('transition-transform', showTech && 'rotate-180')}>▾</span>
+            </button>
+            {showTech && (
+              <p className="text-sm text-white/70 leading-relaxed mt-2 bg-surface2 rounded-xl p-3 whitespace-pre-wrap">{ex.technique}</p>
+            )}
+          </div>
+        )}
 
         {sug && (
           <div className={cls('mt-3 text-sm rounded-xl p-3 border',

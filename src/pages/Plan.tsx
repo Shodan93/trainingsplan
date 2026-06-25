@@ -126,7 +126,7 @@ export default function PlanPage() {
                       <button className="btn-ghost w-full text-sm" onClick={() => setEditEx({
                         id: '', plan_day_id: day.id, exercise_id: null, name: '', muscle_group: 'other',
                         color: '⚪', sets: 3, rep_min: 8, rep_max: 12, per_side: false, is_home: false,
-                        is_warning: false, target_weight: null, unit: 'kg', cue: '', sort_order: list.length + 1
+                        is_warning: false, target_weight: null, unit: 'kg', cue: '', technique: '', sort_order: list.length + 1
                       })}>+ Übung hinzufügen</button>
                     )}
                     {edit && isOwn && (
@@ -203,7 +203,8 @@ function ExerciseEditor({ ex, onClose, onSaved }: { ex: PlanExercise; onClose: (
     const payload = {
       plan_day_id: f.plan_day_id, name: f.name.trim(), muscle_group: f.muscle_group, color: f.color,
       sets: f.sets, rep_min: f.rep_min, rep_max: f.rep_max, per_side: f.per_side, is_home: f.is_home,
-      is_warning: f.is_warning, target_weight: f.target_weight, unit: f.unit, cue: f.cue, sort_order: f.sort_order
+      is_warning: f.is_warning, target_weight: f.target_weight, unit: f.unit, cue: f.cue,
+      technique: f.technique, sort_order: f.sort_order
     }
     if (isNew) await addExercise(payload)
     else await updateExercise(f.id, payload)
@@ -251,6 +252,10 @@ function ExerciseEditor({ ex, onClose, onSaved }: { ex: PlanExercise; onClose: (
         <div>
           <label className="label">Haltungshinweis / Kommentar</label>
           <textarea className="input min-h-[70px]" value={f.cue ?? ''} onChange={e => set({ cue: e.target.value })} />
+        </div>
+        <div>
+          <label className="label">Ausführung im Detail</label>
+          <textarea className="input min-h-[90px]" value={f.technique ?? ''} onChange={e => set({ technique: e.target.value })} placeholder="Schritt-für-Schritt-Anleitung…" />
         </div>
         <div className="flex flex-wrap gap-4 py-1">
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.per_side} onChange={e => set({ per_side: e.target.checked })} /> Pro Seite</label>
