@@ -2,6 +2,14 @@ export function cls(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(' ')
 }
 
+// Akzeptiert Komma UND Punkt als Dezimaltrennzeichen (z. B. "1,5" und "1.5")
+export function parseNum(raw: string): number | null {
+  const norm = raw.replace(',', '.').trim()
+  if (norm === '') return null
+  const n = parseFloat(norm)
+  return isNaN(n) ? null : n
+}
+
 export function fmtDate(d: string | Date) {
   const date = typeof d === 'string' ? new Date(d) : d
   return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })

@@ -9,7 +9,7 @@ import {
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge, SetLog } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
-import { cls, fmtWeight, isoWeekStart, vibrate, todayISO } from '../lib/utils'
+import { cls, fmtWeight, isoWeekStart, vibrate, todayISO, parseNum } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
 import { evaluateBadges } from '../lib/gamification'
 import { confetti } from '../lib/confetti'
@@ -525,15 +525,20 @@ function SumBox({ icon, v, l }: { icon: string; v: string; l: string }) {
 
 function NumberStepper({ value, step, onChange, placeholder }:
   { value: number | null; step: number; onChange: (v: number | null) => void; placeholder?: string }) {
+  const [draft, setDraft] = useState(value == null ? '' : String(value))
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(value == null ? '' : String(value)) }, [value, focused])
   return (
     <div className="flex items-center bg-bg rounded-lg overflow-hidden border border-white/10">
       <button className="px-2.5 py-2 text-white/50 active:bg-white/10 text-lg leading-none"
-        onClick={() => onChange(Math.max(0, (value ?? 0) - step))}>−</button>
+        onClick={() => onChange(Math.max(0, Math.round(((value ?? 0) - step) * 100) / 100))}>−</button>
       <input className="w-full bg-transparent text-center font-semibold outline-none py-2 text-[15px]"
-        type="number" inputMode="decimal" value={value ?? ''} placeholder={placeholder ?? '0'}
-        onChange={(e) => onChange(e.target.value === '' ? null : +e.target.value)} />
+        type="text" inputMode="decimal" value={draft} placeholder={placeholder ?? '0'}
+        onFocus={() => setFocused(true)}
+        onBlur={() => { setFocused(false); onChange(parseNum(draft)) }}
+        onChange={(e) => { setDraft(e.target.value); onChange(parseNum(e.target.value)) }} />
       <button className="px-2.5 py-2 text-white/50 active:bg-white/10 text-lg leading-none"
-        onClick={() => onChange((value ?? 0) + step)}>+</button>
+        onClick={() => onChange(Math.round(((value ?? 0) + step) * 100) / 100)}>+</button>
     </div>
   )
 }

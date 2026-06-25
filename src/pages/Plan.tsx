@@ -6,7 +6,7 @@ import {
 } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { Spinner, Modal, Chip, EmptyState } from '../components/ui'
-import { fmtWeight, cls } from '../lib/utils'
+import { fmtWeight, cls, parseNum } from '../lib/utils'
 
 const COLORS = ['🟠', '🟢', '🔵', '🟣', '🩷', '🟡', '🔴', '⚪']
 const GROUPS = Object.keys(MUSCLE_LABELS)
@@ -242,8 +242,8 @@ function ExerciseEditor({ ex, onClose, onSaved }: { ex: PlanExercise; onClose: (
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div><label className="label">Gewicht ({f.unit})</label>
-            <input className="input" type="number" step="0.25" value={f.target_weight ?? ''} placeholder="–"
-              onChange={e => set({ target_weight: e.target.value === '' ? null : +e.target.value })} /></div>
+            <input className="input" type="text" inputMode="decimal" value={f.target_weight ?? ''} placeholder="–"
+              onChange={e => set({ target_weight: parseNum(e.target.value) })} /></div>
           <div><label className="label">Einheit</label>
             <select className="input" value={f.unit} onChange={e => set({ unit: e.target.value })}>
               <option value="kg">kg</option><option value="lbs">lbs</option>

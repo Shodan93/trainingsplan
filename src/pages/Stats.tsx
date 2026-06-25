@@ -10,7 +10,7 @@ import {
 } from '../lib/db'
 import { WorkoutSession, SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { Spinner, EmptyState, Stat, Modal } from '../components/ui'
-import { fmtDate, fmtDuration, isoWeekStart } from '../lib/utils'
+import { fmtDate, fmtDuration, isoWeekStart, parseNum } from '../lib/utils'
 
 export default function Stats() {
   const { profile } = useAuth()
@@ -251,10 +251,10 @@ function SessionEditor({ session, onClose, onChanged }:
                 {sets.sort((a, b) => a.set_number - b.set_number).map(l => (
                   <div key={l.id} className="grid grid-cols-[1.5rem_1fr_1fr_2rem] gap-2 items-center">
                     <span className="text-center text-xs text-white/50">{l.set_number}</span>
-                    <input className="input !py-1.5 text-center" type="number" step="0.25" value={l.weight ?? ''}
-                      placeholder="kg" onChange={e => patch(l.id, { weight: e.target.value === '' ? null : +e.target.value })} />
-                    <input className="input !py-1.5 text-center" type="number" value={l.reps ?? ''}
-                      placeholder="reps" onChange={e => patch(l.id, { reps: e.target.value === '' ? null : +e.target.value })} />
+                    <input className="input !py-1.5 text-center" type="text" inputMode="decimal" value={l.weight ?? ''}
+                      placeholder="kg" onChange={e => patch(l.id, { weight: parseNum(e.target.value) })} />
+                    <input className="input !py-1.5 text-center" type="text" inputMode="numeric" value={l.reps ?? ''}
+                      placeholder="reps" onChange={e => patch(l.id, { reps: parseNum(e.target.value) })} />
                     <button className="text-white/30 text-sm" onClick={() => removeSet(l.id)}>🗑️</button>
                   </div>
                 ))}
