@@ -38,7 +38,7 @@ npm run build          # Produktion nach dist/
 | Rolle | E-Mail | Passwort |
 |---|---|---|
 | Admin (Debug) | `admin@trainingsplan.app` | `admin` |
-| David | `d+claude@mumelter.de` | `trainingsplan` |
+| David | `d@mumelter.de` | `trainingsplan` |
 | Svenja | `svenja.mumelter@gmx.de` | `trainingsplan` |
 
 > Passwörter nach dem ersten Login in der App/Supabase ändern.
