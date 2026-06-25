@@ -53,6 +53,10 @@ export default function WorkoutRun() {
   const [elapsed, setElapsed] = useState(0)
   const [showTech, setShowTech] = useState(false)
 
+  // Validierung / Abschluss
+  const [repHint, setRepHint] = useState<string | null>(null)
+  const [incomplete, setIncomplete] = useState<{ index: number; name: string; color: string; missing: number }[] | null>(null)
+
   // Post-Workout-Tagebuch
   const [mood, setMood] = useState<number | null>(null)
   const [diaryText, setDiaryText] = useState('')
@@ -195,7 +199,16 @@ export default function WorkoutRun() {
 
   async function toggleComplete(exId: string, i: number) {
     const ex2 = exs.find(e => e.id === exId)!
-    const next = !rows[exId][i].completed
+    const cur = rows[exId][i]
+    const next = !cur.completed
+    // Satz kann nur abgehakt werden, wenn Reps eingetragen sind
+    if (next && (cur.reps == null || cur.reps <= 0)) {
+      const key = `${exId}|${i}`
+      setRepHint(key)
+      if (settings?.vibration_enabled) vibrate(80)
+      setTimeout(() => setRepHint(h => (h === key ? null : h)), 2800)
+      return
+    }
     const updated = rows[exId].map((r, j) => j === i ? { ...r, completed: next } : r)
     setRows(prev => { const c = { ...prev, [exId]: updated }; rowsRef.current = c; return c })
     const row = updated[i]
@@ -246,7 +259,15 @@ export default function WorkoutRun() {
   const totalSets = exs.reduce((a, e) => a + e.sets, 0)
   const doneSets = Object.values(rows).flat().filter(r => r.completed).length
 
-  async function finish() {
+  function requestFinish() {
+    const miss = exs
+      .map((e, index) => ({ index, name: e.name, color: e.color, missing: (rows[e.id] ?? []).filter(r => !r.completed).length }))
+      .filter(m => m.missing > 0)
+    if (miss.length) { setIncomplete(miss); return }
+    doFinish()
+  }
+
+  async function doFinish() {
     if (!profile || !sessionId) return
     // persist any rows that have data but weren't toggled complete? Only completed count for stats.
     const res = await finalizeSession(sessionId)
@@ -321,7 +342,7 @@ export default function WorkoutRun() {
               ⏱ {Math.floor(elapsed / 3600) > 0 ? `${Math.floor(elapsed / 3600)}:` : ''}{String(Math.floor((elapsed % 3600) / 60)).padStart(Math.floor(elapsed / 3600) > 0 ? 2 : 1, '0')}:{String(elapsed % 60).padStart(2, '0')}
             </p>
           </div>
-          <button className="btn-accent !px-3 !py-1.5 text-sm" onClick={finish}>Fertig ✓</button>
+          <button className="btn-accent !px-3 !py-1.5 text-sm" onClick={requestFinish}>Fertig ✓</button>
         </div>
         <div className="flex items-center gap-2">
           <ProgressBar pct={(doneSets / Math.max(1, totalSets)) * 100} color="#22c55e" />
@@ -386,6 +407,9 @@ export default function WorkoutRun() {
               </button>
             </div>
           ))}
+          {repHint?.startsWith(`${ex.id}|`) && (
+            <p className="text-danger text-sm px-1 animate-pop">⚠️ Bitte zuerst die Wiederholungen eintragen, dann abhaken.</p>
+          )}
           <label className="flex items-center gap-2 text-xs text-white/50 px-1 pt-1">
             <input type="checkbox"
               checked={(rows[ex.id] ?? []).slice(-1)[0]?.failure ?? false}
@@ -399,7 +423,7 @@ export default function WorkoutRun() {
           <button className="btn-ghost flex-1" disabled={idx === 0} onClick={() => { setIdx(i => i - 1); window.scrollTo(0, 0) }}>← Zurück</button>
           {idx < exs.length - 1
             ? <button className="btn-primary flex-1" onClick={() => { setIdx(i => i + 1); window.scrollTo(0, 0) }}>Nächste →</button>
-            : <button className="btn-accent flex-1" onClick={finish}>Training beenden ✓</button>}
+            : <button className="btn-accent flex-1" onClick={requestFinish}>Training beenden ✓</button>}
         </div>
       </main>
 
@@ -430,6 +454,28 @@ export default function WorkoutRun() {
           )}
         </div>
       </div>
+
+      {/* Unvollständig-Warnung */}
+      {incomplete && (
+        <Modal open onClose={() => setIncomplete(null)} title="⚠️ Training noch nicht komplett">
+          <div className="space-y-4">
+            <p className="text-white/75">Diese Übungen haben noch offene Sätze. Tippe drauf, um direkt hinzuspringen:</p>
+            <div className="space-y-2">
+              {incomplete.map(m => (
+                <button key={m.index} onClick={() => { setIdx(m.index); setIncomplete(null); window.scrollTo(0, 0) }}
+                  className="card w-full text-left flex items-center justify-between active:scale-[0.99]">
+                  <span className="font-semibold">{m.color} {m.name}</span>
+                  <span className="text-sm text-white/50">{m.missing} Satz{m.missing > 1 ? 'e' : ''} offen →</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-primary flex-1" onClick={() => setIncomplete(null)}>Weiter trainieren</button>
+              <button className="btn-ghost flex-1" onClick={() => { setIncomplete(null); doFinish() }}>Trotzdem beenden</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* DDP celebration */}
       {ddp && (
