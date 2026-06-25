@@ -29,6 +29,8 @@ export default function PlanPage() {
   const [editEx, setEditEx] = useState<PlanExercise | null>(null)
   const [editPlanMeta, setEditPlanMeta] = useState(false)
   const [editDay, setEditDay] = useState<PlanDay | null>(null)
+  const [orderDirty, setOrderDirty] = useState(false)
+  const [confirmSave, setConfirmSave] = useState(false)
 
   const isOwn = viewId === profile?.id
 
@@ -58,10 +60,8 @@ export default function PlanPage() {
 
   useEffect(() => { if (viewId) load(viewId) }, [viewId, load])
 
-  // Drag & Drop: lange auf eine Übung tippen und verschieben (mobil + Desktop)
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  )
+  // Drag & Drop: Reihenfolge nur lokal ändern (Speichern erst per Dialog)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   function handleDragEnd(dayId: string, e: DragEndEvent) {
     const { active, over } = e
     if (!over || active.id === over.id) return
@@ -69,17 +69,22 @@ export default function PlanPage() {
     const oldI = list.findIndex(x => x.id === active.id)
     const newI = list.findIndex(x => x.id === over.id)
     if (oldI < 0 || newI < 0) return
-    const newList = arrayMove(list, oldI, newI)
-    setExByDay(prev => ({ ...prev, [dayId]: newList }))
-    reorderExercises(newList.map(x => x.id))
+    setExByDay(prev => ({ ...prev, [dayId]: arrayMove(list, oldI, newI) }))
+    setOrderDirty(true)
   }
-  function handleMove(dayId: string, index: number, delta: number) {
-    const list = exByDay[dayId] ?? []
-    const j = index + delta
-    if (j < 0 || j >= list.length) return
-    const newList = arrayMove(list, index, j)
-    setExByDay(prev => ({ ...prev, [dayId]: newList }))
-    reorderExercises(newList.map(x => x.id))
+
+  async function saveOrder() {
+    for (const d of days) {
+      const list = exByDay[d.id]
+      if (list && list.length) await reorderExercises(list.map(x => x.id))
+    }
+    setOrderDirty(false)
+    setConfirmSave(false)
+    setEdit(false)
+  }
+  function finishEditing() {
+    if (orderDirty) setConfirmSave(true)
+    else setEdit(false)
   }
 
   if (loading && !plan) return <Spinner label="Lade Plan…" />
@@ -89,7 +94,7 @@ export default function PlanPage() {
       <div className="flex items-center justify-between pt-2">
         <h1 className="text-2xl font-extrabold">📋 Plan</h1>
         {isOwn && plan && (
-          <button className={cls('btn', edit ? 'btn-accent' : 'btn-ghost')} onClick={() => setEdit(e => !e)}>
+          <button className={cls('btn', edit ? 'btn-accent' : 'btn-ghost')} onClick={() => edit ? finishEditing() : setEdit(true)}>
             {edit ? '✓ Fertig' : '✏️ Bearbeiten'}
           </button>
         )}
@@ -150,14 +155,13 @@ export default function PlanPage() {
                 {isOpen && (
                   <div className="px-3 pb-3 space-y-2">
                     {edit && isOwn && list.length > 1 && (
-                      <p className="text-[11px] text-white/40 px-1">Reihenfolge ändern: am Griff ⠿ ziehen oder ▲▼ tippen.</p>
+                      <p className="text-[11px] text-white/40 px-1">Reihenfolge ändern: am Griff ⠿ gedrückt halten und ziehen.</p>
                     )}
                     {edit && isOwn ? (
                       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(day.id, e)}>
                         <SortableContext items={list.map(x => x.id)} strategy={verticalListSortingStrategy}>
-                          {list.map((ex, i) => (
-                            <SortableExercise key={ex.id} ex={ex} index={i} total={list.length}
-                              onEdit={() => setEditEx(ex)} onMove={(delta) => handleMove(day.id, i, delta)} />
+                          {list.map(ex => (
+                            <SortableExercise key={ex.id} ex={ex} onEdit={() => setEditEx(ex)} />
                           ))}
                         </SortableContext>
                       </DndContext>
@@ -210,12 +214,23 @@ export default function PlanPage() {
         <DayEditor day={editDay} onClose={() => setEditDay(null)}
           onSaved={() => { setEditDay(null); load(viewId) }} />
       )}
+      {/* Speichern-Bestätigung beim Beenden des Bearbeitens */}
+      {confirmSave && (
+        <Modal open onClose={() => setConfirmSave(false)} title="Änderungen speichern?">
+          <div className="space-y-4">
+            <p className="text-white/75">Du hast die Reihenfolge der Übungen geändert. Möchtest du das speichern?</p>
+            <div className="flex gap-2">
+              <button className="btn-ghost flex-1" onClick={() => { setConfirmSave(false); setOrderDirty(false); setEdit(false); load(viewId) }}>Verwerfen</button>
+              <button className="btn-primary flex-1" onClick={saveOrder}>Speichern</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
 
-function SortableExercise({ ex, onEdit, onMove, index, total }:
-  { ex: PlanExercise; onEdit: () => void; onMove: (delta: number) => void; index: number; total: number }) {
+function SortableExercise({ ex, onEdit }: { ex: PlanExercise; onEdit: () => void }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: ex.id })
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -225,18 +240,18 @@ function SortableExercise({ ex, onEdit, onMove, index, total }:
   }
   const handle = (
     <button ref={setActivatorNodeRef} {...attributes} {...listeners}
-      className="text-white/40 text-2xl leading-none px-1 cursor-grab active:cursor-grabbing self-stretch flex items-center"
+      className="text-white/40 text-2xl leading-none px-1 self-stretch flex items-center cursor-grab active:cursor-grabbing"
       style={{ touchAction: 'none' }} aria-label="Zum Verschieben ziehen">⠿</button>
   )
   return (
     <div ref={setNodeRef} style={style}>
-      <ExerciseRow ex={ex} edit onEdit={onEdit} handle={handle} onMove={onMove} index={index} total={total} />
+      <ExerciseRow ex={ex} edit onEdit={onEdit} handle={handle} />
     </div>
   )
 }
 
-function ExerciseRow({ ex, edit, onEdit, handle, onMove, index, total }:
-  { ex: PlanExercise; edit: boolean; onEdit: () => void; handle?: React.ReactNode; onMove?: (delta: number) => void; index?: number; total?: number }) {
+function ExerciseRow({ ex, edit, onEdit, handle }:
+  { ex: PlanExercise; edit: boolean; onEdit: () => void; handle?: React.ReactNode }) {
   return (
     <div className="bg-surface2 rounded-xl p-3 flex items-start gap-2" style={{ borderLeft: `3px solid ${MUSCLE_HEX[ex.muscle_group] ?? '#64748b'}` }}>
       {handle}
@@ -253,14 +268,6 @@ function ExerciseRow({ ex, edit, onEdit, handle, onMove, index, total }:
         </p>
         {ex.cue && <p className="text-xs text-white/40 mt-1 leading-snug">{ex.cue}</p>}
       </div>
-      {onMove && (
-        <div className="flex flex-col shrink-0">
-          <button className="text-white/40 disabled:opacity-20 px-1 leading-none text-sm" disabled={index === 0}
-            onPointerDown={e => e.stopPropagation()} onClick={() => onMove(-1)} aria-label="nach oben">▲</button>
-          <button className="text-white/40 disabled:opacity-20 px-1 leading-none text-sm" disabled={(index ?? 0) >= (total ?? 1) - 1}
-            onPointerDown={e => e.stopPropagation()} onClick={() => onMove(1)} aria-label="nach unten">▼</button>
-        </div>
-      )}
       {edit && <button className="btn-ghost !px-2 !py-1 text-sm shrink-0" onPointerDown={e => e.stopPropagation()} onClick={onEdit}>✏️</button>}
     </div>
   )
