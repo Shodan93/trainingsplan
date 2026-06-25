@@ -120,6 +120,16 @@ export async function recomputeSessionVolume(sessionId: string): Promise<number>
 export async function setExerciseTargetWeight(planExerciseId: string, weight: number) {
   await supabase.from('plan_exercises').update({ target_weight: weight }).eq('id', planExerciseId)
 }
+// Set während des Trainings entfernen (nach Satznummer)
+export async function deleteSetLogByNumber(sessionId: string, planExerciseId: string, setNumber: number) {
+  await supabase.from('set_logs').delete()
+    .eq('session_id', sessionId).eq('plan_exercise_id', planExerciseId).eq('set_number', setNumber)
+}
+// Übungsnamen in den Logs der laufenden Session mit umbenennen
+export async function renameSessionExercise(sessionId: string, planExerciseId: string, name: string) {
+  await supabase.from('set_logs').update({ exercise_name: name })
+    .eq('session_id', sessionId).eq('plan_exercise_id', planExerciseId)
+}
 // Open (not yet finished) session, for resume
 export async function getOpenSession(uid: string): Promise<WorkoutSession | null> {
   const { data } = await supabase

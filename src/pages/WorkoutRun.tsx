@@ -5,7 +5,8 @@ import { supabase } from '../lib/supabase'
 import {
   getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
   ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
-  setExerciseTargetWeight, addDiary, getSessionLogs
+  setExerciseTargetWeight, addDiary, getSessionLogs,
+  updateExercise, deleteSetLogByNumber, renameSessionExercise
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge, SetLog } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
@@ -53,6 +54,10 @@ export default function WorkoutRun() {
   // Gesamt-Dauer der Session
   const [elapsed, setElapsed] = useState(0)
   const [showTech, setShowTech] = useState(false)
+
+  // Übung live anpassen
+  const [editEx, setEditEx] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
 
   // Validierung / Abschluss
   const [repHint, setRepHint] = useState<string | null>(null)
@@ -172,6 +177,37 @@ export default function WorkoutRun() {
   }
 
   const ex = exs[idx]
+
+  // Satz hinzufügen / entfernen während des Trainings
+  async function addSet() {
+    if (!ex) return
+    const list = rows[ex.id] ?? []
+    const lastW = list.length ? list[list.length - 1].weight : ex.target_weight
+    const updated = [...list, { weight: lastW ?? null, reps: null, completed: false, failure: false }]
+    setRows(p => { const c = { ...p, [ex.id]: updated }; rowsRef.current = c; return c })
+    setExs(prev => prev.map(e => e.id === ex.id ? { ...e, sets: updated.length } : e))
+    await updateExercise(ex.id, { sets: updated.length })
+  }
+  async function removeSet() {
+    if (!ex) return
+    const list = rows[ex.id] ?? []
+    if (list.length <= 1) return
+    const removedNumber = list.length
+    const updated = list.slice(0, -1)
+    setRows(p => { const c = { ...p, [ex.id]: updated }; rowsRef.current = c; return c })
+    setExs(prev => prev.map(e => e.id === ex.id ? { ...e, sets: updated.length } : e))
+    await deleteSetLogByNumber(sessionId!, ex.id, removedNumber)
+    await updateExercise(ex.id, { sets: updated.length })
+  }
+  async function saveName() {
+    if (!ex) return
+    const n = nameDraft.trim()
+    if (!n) return
+    setExs(prev => prev.map(e => e.id === ex.id ? { ...e, name: n } : e))
+    setEditEx(false)
+    await updateExercise(ex.id, { name: n })
+    await renameSessionExercise(sessionId!, ex.id, n)
+  }
 
   function updateRow(exId: string, i: number, patch: Partial<Row>) {
     setRows(prev => {
@@ -369,7 +405,8 @@ export default function WorkoutRun() {
       <main className="flex-1 px-4 py-4 pb-40 overflow-y-auto">
         <p className="text-xs text-white/40">Übung {idx + 1} / {exs.length}</p>
         <h1 className="text-2xl font-extrabold flex items-center gap-2 mt-1" style={{ color }}>
-          <span>{ex.color}</span> <span className="text-white">{ex.name}</span>
+          <span>{ex.color}</span> <span className="text-white flex-1">{ex.name}</span>
+          <button className="btn-ghost !px-2 !py-1 text-sm shrink-0" onClick={() => { setNameDraft(ex.name); setEditEx(true) }}>✏️</button>
         </h1>
         <p className="text-white/55 mt-1">
           Ziel: {ex.sets} × {ex.rep_min}-{ex.rep_max}{ex.per_side ? '/Seite' : ''}
@@ -425,6 +462,10 @@ export default function WorkoutRun() {
           {repHint?.startsWith(`${ex.id}|`) && (
             <p className="text-danger text-sm px-1 animate-pop">⚠️ Bitte zuerst die Wiederholungen eintragen, dann abhaken.</p>
           )}
+          <div className="flex gap-2 pt-1">
+            <button className="btn-ghost flex-1 text-sm" onClick={addSet}>+ Satz</button>
+            <button className="btn-ghost flex-1 text-sm" disabled={(rows[ex.id]?.length ?? 0) <= 1} onClick={removeSet}>− Satz</button>
+          </div>
           <label className="flex items-center gap-2 text-xs text-white/50 px-1 pt-1">
             <input type="checkbox"
               checked={(rows[ex.id] ?? []).slice(-1)[0]?.failure ?? false}
@@ -469,6 +510,20 @@ export default function WorkoutRun() {
           )}
         </div>
       </div>
+
+      {/* Übung umbenennen */}
+      {editEx && ex && (
+        <Modal open onClose={() => setEditEx(false)} title="Übung anpassen">
+          <div className="space-y-3">
+            <div>
+              <label className="label">Name der Übung</label>
+              <input className="input" value={nameDraft} onChange={e => setNameDraft(e.target.value)} autoFocus />
+            </div>
+            <p className="text-xs text-white/45">Sätze fügst du direkt in der Übung mit „+ Satz" / „− Satz" hinzu oder entfernst sie. Änderungen gelten auch für deinen Plan.</p>
+            <button className="btn-primary w-full" onClick={saveName}>Speichern</button>
+          </div>
+        </Modal>
+      )}
 
       {/* Unvollständig-Warnung */}
       {incomplete && (
