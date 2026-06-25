@@ -7,6 +7,7 @@ const NAV = [
   { to: '/', label: 'Start', icon: '🏠' },
   { to: '/plan', label: 'Plan', icon: '📋' },
   { to: '/workout', label: 'Training', icon: '🔥' },
+  { to: '/verlauf', label: 'Verlauf', icon: '📖' },
   { to: '/stats', label: 'Statistik', icon: '📈' },
   { to: '/profile', label: 'Profil', icon: '👤' }
 ]

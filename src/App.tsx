@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard'
 import PlanPage from './pages/Plan'
 import WorkoutPicker from './pages/Workout'
 import WorkoutRun from './pages/WorkoutRun'
+import History from './pages/History'
 import Profile from './pages/Profile'
 import { ReactNode, lazy, Suspense } from 'react'
 
@@ -29,6 +30,7 @@ export default function App() {
       <Route path="/plan" element={<Protected><PlanPage /></Protected>} />
       <Route path="/workout" element={<Protected><WorkoutPicker /></Protected>} />
       <Route path="/workout/run/:sessionId" element={<Protected><WorkoutRun /></Protected>} />
+      <Route path="/verlauf" element={<Protected><History /></Protected>} />
       <Route path="/stats" element={<Protected><Suspense fallback={<Spinner label="Lade Statistik…" />}><Stats /></Suspense></Protected>} />
       <Route path="/profile" element={<Protected><Profile /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />

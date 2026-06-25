@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { getActivePlan, getDays, getDayExercises, startSession, getOpenSession } from '../lib/db'
+import { getActivePlan, getDays, getDayExercises, startSession, getOpenSession, deleteSession } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, WorkoutSession } from '../lib/types'
 import { Spinner, EmptyState } from '../components/ui'
 import { cls } from '../lib/utils'
@@ -41,6 +41,8 @@ export default function WorkoutPicker() {
     setBusy(true)
     // Offene Session für denselben Tag fortsetzen statt doppelt anzulegen
     if (open && open.plan_day_id === day.id) { nav(`/workout/run/${open.id}`); return }
+    // Nur eine offene Session pro User: vorherige offene verwerfen
+    if (open) await deleteSession(open.id)
     const session = await startSession({
       user_id: profile.id, plan_id: plan.id, plan_day_id: day.id,
       day_title: `${day.weekday} · ${day.title}`, is_deload: deload

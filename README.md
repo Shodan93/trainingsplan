@@ -37,7 +37,6 @@ npm run build          # Produktion nach dist/
 
 | Rolle | E-Mail | Passwort |
 |---|---|---|
-| Admin (Debug) | `admin@trainingsplan.app` | `admin` |
 | David | `d@mumelter.de` | `trainingsplan` |
 | Svenja | `svenja.mumelter@gmx.de` | `trainingsplan` |
 

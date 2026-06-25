@@ -4,13 +4,10 @@ import {
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts'
 import { useAuth } from '../lib/auth'
-import {
-  getSessions, setLogsForSessions, deleteSession,
-  getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume
-} from '../lib/db'
+import { getSessions, setLogsForSessions } from '../lib/db'
 import { WorkoutSession, SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
-import { Spinner, EmptyState, Stat, Modal } from '../components/ui'
-import { fmtDate, fmtDuration, isoWeekStart, parseNum } from '../lib/utils'
+import { Spinner, EmptyState, Stat } from '../components/ui'
+import { fmtDate, isoWeekStart } from '../lib/utils'
 
 export default function Stats() {
   const { profile } = useAuth()
@@ -18,7 +15,6 @@ export default function Stats() {
   const [logs, setLogs] = useState<SetLog[]>([])
   const [loading, setLoading] = useState(true)
   const [exPick, setExPick] = useState<string>('')
-  const [editSession, setEditSession] = useState<WorkoutSession | null>(null)
 
   async function load() {
     if (!profile) return
@@ -29,12 +25,6 @@ export default function Stats() {
     setLoading(false)
   }
   useEffect(() => { load() }, [profile])
-
-  const logsBySession = useMemo(() => {
-    const m: Record<string, SetLog[]> = {}
-    logs.forEach(l => { (m[l.session_id] ??= []).push(l) })
-    return m
-  }, [logs])
 
   // weekly volume (last 8 weeks)
   const weekly = useMemo(() => {
@@ -163,33 +153,7 @@ export default function Stats() {
         )}
       </Card>
 
-      {editSession && (
-        <SessionEditor session={editSession} onClose={() => setEditSession(null)}
-          onChanged={() => { setEditSession(null); load() }} />
-      )}
-
-      {/* History */}
-      <div>
-        <p className="text-sm font-semibold text-white/50 mb-2 px-1">Verlauf</p>
-        <div className="space-y-2">
-          {sessions.map(s => (
-            <div key={s.id} className="card flex items-center justify-between !py-3">
-              <button className="min-w-0 text-left flex-1" onClick={() => setEditSession(s)}>
-                <p className="font-semibold truncate">{s.day_title ?? 'Training'} {s.is_deload && '🧘'}</p>
-                <p className="text-xs text-white/45">
-                  {fmtDate(s.completed_at ?? s.started_at)} · {fmtDuration(s.duration_seconds)} ·
-                  {' '}{Math.round(Number(s.total_volume)).toLocaleString('de-DE')} kg · {(logsBySession[s.id] ?? []).filter(l => l.completed).length} Sätze
-                </p>
-              </button>
-              <div className="flex gap-1 shrink-0">
-                <button className="btn-ghost !px-2 !py-1 text-sm" onClick={() => setEditSession(s)}>✏️</button>
-                <button className="btn-ghost !px-2 !py-1 text-sm text-white/40"
-                  onClick={async () => { if (confirm('Diese Session löschen?')) { await deleteSession(s.id); load() } }}>🗑️</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <p className="text-center text-xs text-white/35 pb-2">Einzelne Trainings findest du im Tab „Verlauf".</p>
     </div>
   )
 }
@@ -202,76 +166,5 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
       <p className="font-bold mb-3 text-sm">{title}</p>
       {children}
     </div>
-  )
-}
-
-function SessionEditor({ session, onClose, onChanged }:
-  { session: WorkoutSession; onClose: () => void; onChanged: () => void }) {
-  const [logs, setLogs] = useState<SetLog[]>([])
-  const [notes, setNotes] = useState(session.notes ?? '')
-  const [busy, setBusy] = useState(false)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { getSessionLogs(session.id).then(l => { setLogs(l); setLoading(false) }) }, [session.id])
-
-  const grouped = useMemo(() => {
-    const m: Record<string, SetLog[]> = {}
-    logs.forEach(l => { (m[l.exercise_name] ??= []).push(l) })
-    return Object.entries(m)
-  }, [logs])
-
-  function patch(id: string, p: Partial<SetLog>) {
-    setLogs(prev => prev.map(l => l.id === id ? { ...l, ...p } : l))
-  }
-
-  async function save() {
-    setBusy(true)
-    for (const l of logs) {
-      await updateSetLogById(l.id, { weight: l.weight, reps: l.reps, completed: l.completed })
-    }
-    await updateSession(session.id, { notes })
-    await recomputeSessionVolume(session.id)
-    setBusy(false); onChanged()
-  }
-
-  async function removeSet(id: string) {
-    await deleteSetLog(id)
-    setLogs(prev => prev.filter(l => l.id !== id))
-  }
-
-  return (
-    <Modal open onClose={onClose} title="Training bearbeiten">
-      {loading ? <Spinner /> : (
-        <div className="space-y-4">
-          <p className="text-xs text-white/45">{session.day_title} · {fmtDate(session.completed_at ?? session.started_at)}</p>
-          {grouped.map(([name, sets]) => (
-            <div key={name}>
-              <p className="font-semibold text-sm mb-1">{name}</p>
-              <div className="space-y-1.5">
-                {sets.sort((a, b) => a.set_number - b.set_number).map(l => (
-                  <div key={l.id} className="grid grid-cols-[1.5rem_1fr_1fr_2rem] gap-2 items-center">
-                    <span className="text-center text-xs text-white/50">{l.set_number}</span>
-                    <input className="input !py-1.5 text-center" type="text" inputMode="decimal" value={l.weight ?? ''}
-                      placeholder="kg" onChange={e => patch(l.id, { weight: parseNum(e.target.value) })} />
-                    <input className="input !py-1.5 text-center" type="text" inputMode="numeric" value={l.reps ?? ''}
-                      placeholder="reps" onChange={e => patch(l.id, { reps: parseNum(e.target.value) })} />
-                    <button className="text-white/30 text-sm" onClick={() => removeSet(l.id)}>🗑️</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-          {!grouped.length && <p className="text-sm text-white/40">Keine Sätze geloggt.</p>}
-          <div>
-            <label className="label">Notiz</label>
-            <textarea className="input min-h-[60px]" value={notes} onChange={e => setNotes(e.target.value)} />
-          </div>
-          <div className="flex gap-2">
-            <button className="btn-danger" onClick={async () => { if (confirm('Ganzes Training löschen?')) { await deleteSession(session.id); onChanged() } }}>Training löschen</button>
-            <button className="btn-primary flex-1" disabled={busy} onClick={save}>{busy ? 'Speichern…' : 'Speichern'}</button>
-          </div>
-        </div>
-      )}
-    </Modal>
   )
 }
