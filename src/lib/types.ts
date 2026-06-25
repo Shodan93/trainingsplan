@@ -10,6 +10,7 @@ export type Settings = {
   default_rest_seconds: number
   sound_enabled: boolean
   vibration_enabled: boolean
+  notifications_enabled: boolean
   theme: string
   units: string
 }

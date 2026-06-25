@@ -11,6 +11,7 @@ import {
 } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
 import { fmtDate, levelProgress, isoWeekStart, cls, todayISO } from '../lib/utils'
+import { ensureNotifyPermission } from '../lib/notify'
 
 const AVATARS = ['💪', '🏋️', '🔥', '🦾', '🏃', '🧗', '⚡', '🦁', '🐺', '🌟']
 const TABS = ['Übersicht', 'Ziele', 'Maße', 'Tagebuch', 'Einstellungen'] as const
@@ -239,6 +240,10 @@ function SettingsTab({ uid, settings, onChange, weekTarget, onWeek, displayName,
       <div className="card space-y-1">
         <Toggle label="🔊 Ton (Timer & Sätze)" on={settings.sound_enabled} set={v => save({ sound_enabled: v })} />
         <Toggle label="📳 Vibration" on={settings.vibration_enabled} set={v => save({ vibration_enabled: v })} />
+        <Toggle label="🔔 Benachrichtigung (Timer-Ende)" on={settings.notifications_enabled} set={async v => {
+          if (v) { const ok = await ensureNotifyPermission(); if (!ok) { alert('Bitte Benachrichtigungen im Browser/iOS erlauben. Auf dem iPhone muss die App über „Zum Home-Bildschirm" installiert sein.'); return } }
+          save({ notifications_enabled: v })
+        }} />
       </div>
       <div>
         <label className="label px-1">Einheit</label>

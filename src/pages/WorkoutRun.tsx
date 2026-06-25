@@ -13,6 +13,7 @@ import { cls, fmtWeight, isoWeekStart, vibrate, todayISO, parseNum } from '../li
 import { timerDoneSound, successSound, beep } from '../lib/sound'
 import { evaluateBadges } from '../lib/gamification'
 import { confetti } from '../lib/confetti'
+import { notify, ensureNotifyPermission } from '../lib/notify'
 
 type Row = { weight: number | null; reps: number | null; completed: boolean; failure: boolean }
 type Sug = { action: string; message: string }
@@ -117,6 +118,7 @@ export default function WorkoutRun() {
         firedRef.current = true
         if (settings?.sound_enabled) timerDoneSound()
         if (settings?.vibration_enabled) vibrate([300, 150, 300, 150, 400])
+        if (settings?.notifications_enabled) notify('Pause vorbei! 💪', `${ex?.name ?? 'Nächster Satz'} – auf geht's!`)
         setRestEndAt(null); setRestLeft(null)
       }
     }
@@ -158,7 +160,11 @@ export default function WorkoutRun() {
     return () => clearInterval(id)
   }, [session])
 
-  function startRest() { firedRef.current = false; setRestEndAt(Date.now() + restTotal * 1000) }
+  function startRest() {
+    firedRef.current = false
+    if (settings?.notifications_enabled) ensureNotifyPermission()
+    setRestEndAt(Date.now() + restTotal * 1000)
+  }
   function stopRest() { setRestEndAt(null); setRestLeft(null) }
   function adjustRest(delta: number) {
     setRestTotal(t => Math.max(15, t + delta))
