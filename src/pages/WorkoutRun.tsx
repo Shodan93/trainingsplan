@@ -5,11 +5,11 @@ import { supabase } from '../lib/supabase'
 import {
   getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
   ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
-  setExerciseTargetWeight
+  setExerciseTargetWeight, addDiary
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
-import { cls, fmtWeight, isoWeekStart, vibrate } from '../lib/utils'
+import { cls, fmtWeight, isoWeekStart, vibrate, todayISO } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
 import { evaluateBadges } from '../lib/gamification'
 import { confetti } from '../lib/confetti'
@@ -44,6 +44,11 @@ export default function WorkoutRun() {
   const [ddp, setDdp] = useState<null | { exId: string; name: string; current: number; suggested: number; unit: string }>(null)
   const celebrated = useRef<Set<string>>(new Set())
   const progressed = useRef<Set<string>>(new Set())
+
+  // Post-Workout-Tagebuch
+  const [mood, setMood] = useState<number | null>(null)
+  const [diaryText, setDiaryText] = useState('')
+  const [savedDiary, setSavedDiary] = useState(false)
 
   const load = useCallback(async () => {
     if (!sessionId || !profile) return
@@ -180,6 +185,27 @@ export default function WorkoutRun() {
     const badgeObjs = allBadges.filter(b => newCodes.includes(b.code))
     const tip = tips.length ? tips[Math.floor(Math.random() * tips.length)].text : ''
     setSummary({ xp: res.xp_earned, volume: res.total_volume, streak: res.streak, level: res.level, badges: badgeObjs, tip })
+  }
+
+  const MOODS = [
+    { v: 1, e: '😣', l: 'mies' },
+    { v: 2, e: '😕', l: 'okay' },
+    { v: 3, e: '🙂', l: 'gut' },
+    { v: 4, e: '💪', l: 'stark' },
+    { v: 5, e: '🔥', l: 'top' }
+  ]
+
+  async function finishAndGoHome() {
+    if (profile && (mood || diaryText.trim()) && !savedDiary) {
+      const moodLabel = MOODS.find(m => m.v === mood)?.l
+      const parts = [`${session?.day_title ?? 'Training'} abgeschlossen`]
+      if (moodLabel) parts.push(`Gefühl: ${moodLabel}`)
+      const head = parts.join(' · ')
+      const content = diaryText.trim() ? `${head}\n${diaryText.trim()}` : head
+      await addDiary({ user_id: profile.id, content, entry_date: todayISO(), mood: mood ?? undefined })
+      setSavedDiary(true)
+    }
+    nav('/')
   }
 
   async function cancel() {
@@ -337,7 +363,7 @@ export default function WorkoutRun() {
 
       {/* Summary */}
       {summary && (
-        <Modal open onClose={() => nav('/')} title="🎉 Workout abgeschlossen!">
+        <Modal open onClose={finishAndGoHome} title="🎉 Workout abgeschlossen!">
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <SumBox icon="⚡" v={`+${summary.xp}`} l="XP verdient" />
@@ -357,10 +383,31 @@ export default function WorkoutRun() {
                 </div>
               </div>
             )}
+
+            {/* Tagebuch-Abfrage */}
+            <div className="card bg-surface2 border-white/5">
+              <p className="font-semibold mb-2">📔 Wie war dein Training?</p>
+              <div className="flex justify-between gap-1 mb-3">
+                {MOODS.map(m => (
+                  <button key={m.v} onClick={() => setMood(m.v)}
+                    className={cls('flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition active:scale-90',
+                      mood === m.v ? 'bg-primary/20 ring-2 ring-primary' : 'bg-white/5')}>
+                    <span className="text-2xl">{m.e}</span>
+                    <span className="text-[10px] text-white/50">{m.l}</span>
+                  </button>
+                ))}
+              </div>
+              <textarea className="input min-h-[64px]" value={diaryText} onChange={e => setDiaryText(e.target.value)}
+                placeholder="Notiz fürs Tagebuch (optional) – Gedanken, Schmerzen, Highlights…" />
+              <p className="text-[11px] text-white/35 mt-1">Wird mit Datum automatisch ins Tagebuch übernommen.</p>
+            </div>
+
             {summary.tip && (
               <div className="card bg-primary/5 border-primary/15 text-sm text-white/80">💡 {summary.tip}</div>
             )}
-            <button className="btn-primary w-full" onClick={() => nav('/')}>Zum Dashboard</button>
+            <button className="btn-primary w-full" onClick={finishAndGoHome}>
+              {mood || diaryText.trim() ? 'Speichern & zum Dashboard' : 'Zum Dashboard'}
+            </button>
           </div>
         </Modal>
       )}
