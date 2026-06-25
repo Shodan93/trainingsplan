@@ -8,7 +8,7 @@ import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from 
 import { Spinner, Modal, Chip, EmptyState } from '../components/ui'
 import { fmtWeight, cls, parseNum } from '../lib/utils'
 import {
-  DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragEndEvent
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -60,8 +60,7 @@ export default function PlanPage() {
 
   // Drag & Drop: lange auf eine Übung tippen und verschieben (mobil + Desktop)
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   )
   function handleDragEnd(dayId: string, e: DragEndEvent) {
     const { active, over } = e
@@ -71,6 +70,14 @@ export default function PlanPage() {
     const newI = list.findIndex(x => x.id === over.id)
     if (oldI < 0 || newI < 0) return
     const newList = arrayMove(list, oldI, newI)
+    setExByDay(prev => ({ ...prev, [dayId]: newList }))
+    reorderExercises(newList.map(x => x.id))
+  }
+  function handleMove(dayId: string, index: number, delta: number) {
+    const list = exByDay[dayId] ?? []
+    const j = index + delta
+    if (j < 0 || j >= list.length) return
+    const newList = arrayMove(list, index, j)
     setExByDay(prev => ({ ...prev, [dayId]: newList }))
     reorderExercises(newList.map(x => x.id))
   }
@@ -143,13 +150,14 @@ export default function PlanPage() {
                 {isOpen && (
                   <div className="px-3 pb-3 space-y-2">
                     {edit && isOwn && list.length > 1 && (
-                      <p className="text-[11px] text-white/40 px-1">↕︎ Übung gedrückt halten und verschieben, um die Reihenfolge zu ändern.</p>
+                      <p className="text-[11px] text-white/40 px-1">Reihenfolge ändern: am Griff ⠿ ziehen oder ▲▼ tippen.</p>
                     )}
                     {edit && isOwn ? (
                       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(day.id, e)}>
                         <SortableContext items={list.map(x => x.id)} strategy={verticalListSortingStrategy}>
-                          {list.map(ex => (
-                            <SortableExercise key={ex.id} ex={ex} onEdit={() => setEditEx(ex)} />
+                          {list.map((ex, i) => (
+                            <SortableExercise key={ex.id} ex={ex} index={i} total={list.length}
+                              onEdit={() => setEditEx(ex)} onMove={(delta) => handleMove(day.id, i, delta)} />
                           ))}
                         </SortableContext>
                       </DndContext>
@@ -206,26 +214,32 @@ export default function PlanPage() {
   )
 }
 
-function SortableExercise({ ex, onEdit }: { ex: PlanExercise; onEdit: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: ex.id })
+function SortableExercise({ ex, onEdit, onMove, index, total }:
+  { ex: PlanExercise; onEdit: () => void; onMove: (delta: number) => void; index: number; total: number }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: ex.id })
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.6 : 1,
-    zIndex: isDragging ? 20 : undefined,
-    touchAction: 'manipulation'
+    zIndex: isDragging ? 20 : undefined
   }
+  const handle = (
+    <button ref={setActivatorNodeRef} {...attributes} {...listeners}
+      className="text-white/40 text-2xl leading-none px-1 cursor-grab active:cursor-grabbing self-stretch flex items-center"
+      style={{ touchAction: 'none' }} aria-label="Zum Verschieben ziehen">⠿</button>
+  )
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <ExerciseRow ex={ex} edit onEdit={onEdit} grip />
+    <div ref={setNodeRef} style={style}>
+      <ExerciseRow ex={ex} edit onEdit={onEdit} handle={handle} onMove={onMove} index={index} total={total} />
     </div>
   )
 }
 
-function ExerciseRow({ ex, edit, onEdit, grip }: { ex: PlanExercise; edit: boolean; onEdit: () => void; grip?: boolean }) {
+function ExerciseRow({ ex, edit, onEdit, handle, onMove, index, total }:
+  { ex: PlanExercise; edit: boolean; onEdit: () => void; handle?: React.ReactNode; onMove?: (delta: number) => void; index?: number; total?: number }) {
   return (
-    <div className="bg-surface2 rounded-xl p-3 flex items-start gap-3" style={{ borderLeft: `3px solid ${MUSCLE_HEX[ex.muscle_group] ?? '#64748b'}` }}>
-      {grip && <span className="text-white/30 text-lg leading-none mt-0.5 select-none" aria-hidden>⠿</span>}
+    <div className="bg-surface2 rounded-xl p-3 flex items-start gap-2" style={{ borderLeft: `3px solid ${MUSCLE_HEX[ex.muscle_group] ?? '#64748b'}` }}>
+      {handle}
       <span className="text-lg leading-none mt-0.5">{ex.color}</span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -239,6 +253,14 @@ function ExerciseRow({ ex, edit, onEdit, grip }: { ex: PlanExercise; edit: boole
         </p>
         {ex.cue && <p className="text-xs text-white/40 mt-1 leading-snug">{ex.cue}</p>}
       </div>
+      {onMove && (
+        <div className="flex flex-col shrink-0">
+          <button className="text-white/40 disabled:opacity-20 px-1 leading-none text-sm" disabled={index === 0}
+            onPointerDown={e => e.stopPropagation()} onClick={() => onMove(-1)} aria-label="nach oben">▲</button>
+          <button className="text-white/40 disabled:opacity-20 px-1 leading-none text-sm" disabled={(index ?? 0) >= (total ?? 1) - 1}
+            onPointerDown={e => e.stopPropagation()} onClick={() => onMove(1)} aria-label="nach unten">▼</button>
+        </div>
+      )}
       {edit && <button className="btn-ghost !px-2 !py-1 text-sm shrink-0" onPointerDown={e => e.stopPropagation()} onClick={onEdit}>✏️</button>}
     </div>
   )

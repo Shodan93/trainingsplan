@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth'
 import { getSessions, setLogsForSessions } from '../lib/db'
 import { WorkoutSession, SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { Spinner, EmptyState, Stat } from '../components/ui'
-import { fmtDate, isoWeekStart } from '../lib/utils'
+import { fmtDate, isoWeekStart, MOODS } from '../lib/utils'
 
 export default function Stats() {
   const { profile } = useAuth()
@@ -85,6 +85,22 @@ export default function Stats() {
   return (
     <div className="space-y-5 py-2">
       <h1 className="text-2xl font-extrabold pt-2">📈 Statistik</h1>
+
+      {/* Stimmungs-Übersicht: wie viele Trainings welche Bewertung */}
+      <div className="card">
+        <p className="font-bold mb-3 text-sm">Bewertung der Trainings</p>
+        <div className="flex justify-between gap-1">
+          {MOODS.map(m => {
+            const n = sessions.filter(s => s.mood === m.v).length
+            return (
+              <div key={m.v} className="flex-1 flex flex-col items-center gap-1 bg-surface2 rounded-xl py-3">
+                <span className="text-3xl leading-none">{m.e}</span>
+                <span className="text-lg font-extrabold leading-none">{n}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       <div className="flex gap-3">
         <Stat icon="🏆" value={sessions.length} label="Workouts" color="#22c55e" />
