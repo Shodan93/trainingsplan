@@ -99,6 +99,27 @@ export async function finalizeSession(sessionId: string) {
 export async function deleteSession(sessionId: string) {
   await supabase.from('workout_sessions').delete().eq('id', sessionId)
 }
+export async function updateSession(sessionId: string, patch: Partial<WorkoutSession>) {
+  await supabase.from('workout_sessions').update(patch).eq('id', sessionId)
+}
+export async function updateSetLogById(id: string, patch: Partial<SetLog>) {
+  await supabase.from('set_logs').update(patch).eq('id', id)
+}
+export async function deleteSetLog(id: string) {
+  await supabase.from('set_logs').delete().eq('id', id)
+}
+// Recompute a session's total_volume from its completed set logs and persist it.
+export async function recomputeSessionVolume(sessionId: string): Promise<number> {
+  const logs = await getSessionLogs(sessionId)
+  const vol = logs.filter(l => l.completed)
+    .reduce((a, l) => a + (Number(l.weight) || 0) * (Number(l.reps) || 0), 0)
+  await supabase.from('workout_sessions').update({ total_volume: vol }).eq('id', sessionId)
+  return vol
+}
+// DDP: persist a new working weight on a plan exercise.
+export async function setExerciseTargetWeight(planExerciseId: string, weight: number) {
+  await supabase.from('plan_exercises').update({ target_weight: weight }).eq('id', planExerciseId)
+}
 export async function getSessions(uid: string, limit = 50): Promise<WorkoutSession[]> {
   const { data } = await supabase
     .from('workout_sessions').select('*')

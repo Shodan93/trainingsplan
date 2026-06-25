@@ -4,13 +4,15 @@ import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
   getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
-  ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges
+  ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
+  setExerciseTargetWeight
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
 import { cls, fmtWeight, isoWeekStart, vibrate } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
 import { evaluateBadges } from '../lib/gamification'
+import { confetti } from '../lib/confetti'
 
 type Row = { weight: number | null; reps: number | null; completed: boolean; failure: boolean }
 type Sug = { action: string; message: string }
@@ -37,6 +39,11 @@ export default function WorkoutRun() {
   const [summary, setSummary] = useState<null | {
     xp: number; volume: number; streak: number; level: number; badges: Badge[]; tip: string
   }>(null)
+
+  // Dynamic Double Progression celebration
+  const [ddp, setDdp] = useState<null | { exId: string; name: string; current: number; suggested: number; unit: string }>(null)
+  const celebrated = useRef<Set<string>>(new Set())
+  const progressed = useRef<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     if (!sessionId || !profile) return
@@ -101,10 +108,11 @@ export default function WorkoutRun() {
   }
 
   async function toggleComplete(exId: string, i: number) {
-    const row = rows[exId][i]
     const ex2 = exs.find(e => e.id === exId)!
-    const next = !row.completed
-    updateRow(exId, i, { completed: next })
+    const next = !rows[exId][i].completed
+    const updated = rows[exId].map((r, j) => j === i ? { ...r, completed: next } : r)
+    setRows(prev => ({ ...prev, [exId]: updated }))
+    const row = updated[i]
     if (next) {
       if (settings?.sound_enabled) beep(740, 0.1)
       if (settings?.vibration_enabled) vibrate(40)
@@ -116,12 +124,37 @@ export default function WorkoutRun() {
         completed: true, rest_seconds: restTotal
       })
       startRest()
+      maybeCelebrateDDP(ex2, updated)
     } else {
       await saveSetLog({
         session_id: sessionId!, plan_exercise_id: exId, exercise_name: ex2.name,
         set_number: i + 1, weight: row.weight, reps: row.reps, completed: false
       })
     }
+  }
+
+  // Dynamic Double Progression: alle Arbeitssätze erledigt UND alle am oberen Rep-Ende → feiern + Gewicht erhöhen
+  function maybeCelebrateDDP(ex2: PlanExercise, list: Row[]) {
+    if (celebrated.current.has(ex2.id)) return
+    const allDone = list.every(r => r.completed)
+    const allTop = list.every(r => (r.reps ?? 0) >= ex2.rep_max)
+    const weights = list.map(r => r.weight ?? 0).filter(w => w > 0)
+    if (!allDone || !allTop || !weights.length) return
+    const w = Math.max(...weights)
+    celebrated.current.add(ex2.id)
+    confetti()
+    if (settings?.sound_enabled) successSound()
+    if (settings?.vibration_enabled) vibrate([60, 40, 60, 40, 120])
+    const step = ex2.unit === 'kg' ? 2.5 : 5
+    setDdp({ exId: ex2.id, name: ex2.name, current: w, suggested: w + step, unit: ex2.unit })
+  }
+
+  async function applyIncrease() {
+    if (!ddp) return
+    await setExerciseTargetWeight(ddp.exId, ddp.suggested)
+    setExs(prev => prev.map(e => e.id === ddp.exId ? { ...e, target_weight: ddp.suggested } : e))
+    progressed.current.add(ddp.exId)
+    setDdp(null)
   }
 
   const totalSets = exs.reduce((a, e) => a + e.sets, 0)
@@ -134,12 +167,8 @@ export default function WorkoutRun() {
     if (settings?.sound_enabled) successSound()
     vibrate([100, 60, 100, 60, 200])
 
-    // detect DDP progression: any completed set heavier than plan target
-    let didIncrease = false
-    for (const e of exs) {
-      const t = e.target_weight ?? -Infinity
-      if ((rows[e.id] ?? []).some(r => r.completed && (r.weight ?? -Infinity) > t)) didIncrease = true
-    }
+    // DDP progression happened if the user confirmed at least one weight increase
+    const didIncrease = progressed.current.size > 0
     const [stats, week, tips, allBadges] = await Promise.all([
       getStats(profile.id), getWeeklyTarget(profile.id, isoWeekStart()), getTips(), getBadges()
     ])
@@ -277,6 +306,34 @@ export default function WorkoutRun() {
           )}
         </div>
       </div>
+
+      {/* DDP celebration */}
+      {ddp && (
+        <Modal open onClose={() => setDdp(null)} title="🎉 Rep-Range geknackt!">
+          <div className="space-y-4 text-center">
+            <p className="text-5xl animate-pop">📈🎊</p>
+            <p className="text-white/80">
+              Du hast bei <span className="font-bold text-white">{ddp.name}</span> alle Sätze am
+              oberen Ende der Wiederholungs-Range geschafft – <b>Dynamic Double Progression!</b>
+            </p>
+            <div className="card bg-success/10 border-success/30">
+              <p className="text-sm text-white/60">Neues Arbeitsgewicht</p>
+              <p className="text-2xl font-extrabold text-success">
+                {fmtWeight(ddp.current, ddp.unit)} → {fmtWeight(ddp.suggested, ddp.unit)}
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <button className="btn-ghost !px-3" onClick={() => setDdp(d => d && { ...d, suggested: Math.max(d.current, d.suggested - (ddp.unit === 'kg' ? 2.5 : 5)) })}>−</button>
+              <span className="text-sm text-white/60">Gewicht anpassen</span>
+              <button className="btn-ghost !px-3" onClick={() => setDdp(d => d && { ...d, suggested: d.suggested + (ddp.unit === 'kg' ? 2.5 : 5) })}>+</button>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-ghost flex-1" onClick={() => setDdp(null)}>Später</button>
+              <button className="btn-accent flex-1" onClick={applyIncrease}>Gewicht erhöhen ✓</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Summary */}
       {summary && (
