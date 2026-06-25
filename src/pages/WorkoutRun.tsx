@@ -16,7 +16,7 @@ import { evaluateBadges } from '../lib/gamification'
 import { confetti } from '../lib/confetti'
 import { notify, ensureNotifyPermission } from '../lib/notify'
 
-type Row = { weight: number | null; reps: number | null; completed: boolean; failure: boolean }
+type Row = { weight: number | null; reps: number | null; completed: boolean; failure: boolean; lastWeight: number | null; lastReps: number | null }
 type Sug = { action: string; message: string }
 
 export default function WorkoutRun() {
@@ -62,6 +62,7 @@ export default function WorkoutRun() {
   // Validierung / Abschluss
   const [repHint, setRepHint] = useState<string | null>(null)
   const [incomplete, setIncomplete] = useState<{ index: number; name: string; color: string; missing: number }[] | null>(null)
+  const [nextWarn, setNextWarn] = useState(false)
 
   // Post-Workout-Tagebuch
   const [mood, setMood] = useState<number | null>(null)
@@ -95,17 +96,19 @@ export default function WorkoutRun() {
       ])
       if (sug) sg[ex.id] = sug
       r[ex.id] = Array.from({ length: ex.sets }, (_, i) => {
+        const prev = last[i]
+        const lastWeight = prev?.weight ?? null
+        const lastReps = prev?.reps ?? null
         const saved = byKey[`${ex.id}|${i + 1}`]
         if (saved) {
           return {
             weight: saved.weight ?? null, reps: saved.reps ?? null,
-            completed: saved.completed, failure: saved.is_failure
+            completed: saved.completed, failure: saved.is_failure, lastWeight, lastReps
           }
         }
-        const prev = last[i]
         let w = prev?.weight ?? ex.target_weight ?? null
         if (sess.is_deload && w != null) w = Math.round((w * 0.5) / 0.25) * 0.25
-        return { weight: w, reps: null, completed: false, failure: false }
+        return { weight: w, reps: null, completed: false, failure: false, lastWeight, lastReps }
       })
     }))
     setRows(r); rowsRef.current = r; setSugs(sg); setLoading(false)
@@ -183,7 +186,7 @@ export default function WorkoutRun() {
     if (!ex) return
     const list = rows[ex.id] ?? []
     const lastW = list.length ? list[list.length - 1].weight : ex.target_weight
-    const updated = [...list, { weight: lastW ?? null, reps: null, completed: false, failure: false }]
+    const updated = [...list, { weight: lastW ?? null, reps: null, completed: false, failure: false, lastWeight: null, lastReps: null }]
     setRows(p => { const c = { ...p, [ex.id]: updated }; rowsRef.current = c; return c })
     setExs(prev => prev.map(e => e.id === ex.id ? { ...e, sets: updated.length } : e))
     await updateExercise(ex.id, { sets: updated.length })
@@ -320,6 +323,14 @@ export default function WorkoutRun() {
   const totalSets = exs.reduce((a, e) => a + e.sets, 0)
   const doneSets = Object.values(rows).flat().filter(r => r.completed).length
 
+  function gotoNext() { setNextWarn(false); setIdx(i => i + 1); window.scrollTo(0, 0) }
+  function tryNext() {
+    const list = rows[ex.id] ?? []
+    const allDone = list.length > 0 && list.every(r => r.completed)
+    if (!allDone) { setNextWarn(true); return }
+    gotoNext()
+  }
+
   function requestFinish() {
     const miss = exs
       .map((e, index) => ({ index, name: e.name, color: e.color, missing: (rows[e.id] ?? []).filter(r => !r.completed).length }))
@@ -444,20 +455,23 @@ export default function WorkoutRun() {
             <span>#</span><span>Gewicht ({ex.unit})</span><span>Reps</span><span className="text-center">✓</span><span></span>
           </div>
           {(rows[ex.id] ?? []).map((row, i) => (
-            <div key={i} className={cls('grid grid-cols-[1.4rem_1fr_1fr_2.4rem_1.4rem] gap-1.5 items-center rounded-xl p-2 transition',
-              row.completed ? 'bg-success/15 border border-success/30' : 'bg-surface2')}>
-              <span className="text-center font-bold text-white/60 text-sm">{i + 1}</span>
-              <NumberStepper value={row.weight} step={ex.unit === 'kg' ? 2.5 : 5}
-                onChange={(v) => updateRow(ex.id, i, { weight: v })} />
-              <NumberStepper value={row.reps} step={1} placeholder={`${ex.rep_min}-${ex.rep_max}`}
-                onChange={(v) => updateRow(ex.id, i, { reps: v })} />
-              <button onClick={() => toggleComplete(ex.id, i)}
-                className={cls('h-10 rounded-lg font-bold text-lg transition active:scale-90',
-                  row.completed ? 'bg-success text-white' : 'bg-white/10 text-white/40')}>
-                {row.completed ? '✓' : '○'}
-              </button>
-              <button onClick={() => removeSetAt(i)} disabled={(rows[ex.id]?.length ?? 0) <= 1}
-                className="text-white/30 disabled:opacity-20 active:scale-90 text-sm" title="Satz löschen">🗑️</button>
+            <div key={i}>
+              <div className={cls('grid grid-cols-[1.4rem_1fr_1fr_2.4rem_1.4rem] gap-1.5 items-center rounded-xl p-2 transition',
+                row.completed ? 'bg-success/15 border border-success/30' : 'bg-surface2')}>
+                <span className="text-center font-bold text-white/60 text-sm">{i + 1}</span>
+                <NumberStepper value={row.weight} step={ex.unit === 'kg' ? 2.5 : 5}
+                  onChange={(v) => updateRow(ex.id, i, { weight: v })} />
+                <NumberStepper value={row.reps} step={1} placeholder={`${ex.rep_min}-${ex.rep_max}`}
+                  onChange={(v) => updateRow(ex.id, i, { reps: v })} />
+                <button onClick={() => toggleComplete(ex.id, i)}
+                  className={cls('h-10 rounded-lg font-bold text-lg transition active:scale-90',
+                    row.completed ? 'bg-success text-white' : 'bg-white/10 text-white/40')}>
+                  {row.completed ? '✓' : '○'}
+                </button>
+                <button onClick={() => removeSetAt(i)} disabled={(rows[ex.id]?.length ?? 0) <= 1}
+                  className="text-white/30 disabled:opacity-20 active:scale-90 text-sm" title="Satz löschen">🗑️</button>
+              </div>
+              {row.lastReps != null && <LastHint row={row} unit={ex.unit} />}
             </div>
           ))}
           {repHint?.startsWith(`${ex.id}|`) && (
@@ -476,7 +490,7 @@ export default function WorkoutRun() {
         <div className="flex gap-2 mt-6">
           <button className="btn-ghost flex-1" disabled={idx === 0} onClick={() => { setIdx(i => i - 1); window.scrollTo(0, 0) }}>← Zurück</button>
           {idx < exs.length - 1
-            ? <button className="btn-primary flex-1" onClick={() => { setIdx(i => i + 1); window.scrollTo(0, 0) }}>Nächste →</button>
+            ? <button className="btn-primary flex-1" onClick={tryNext}>Nächste →</button>
             : <button className="btn-accent flex-1" onClick={requestFinish}>Training beenden ✓</button>}
         </div>
       </main>
@@ -519,6 +533,19 @@ export default function WorkoutRun() {
             </div>
             <p className="text-xs text-white/45">Sätze fügst du direkt in der Übung mit „+ Satz" / „− Satz" hinzu oder entfernst sie. Änderungen gelten auch für deinen Plan.</p>
             <button className="btn-primary w-full" onClick={saveName}>Speichern</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Warnung beim Weiterklicken (Übung nicht komplett) */}
+      {nextWarn && (
+        <Modal open onClose={() => setNextWarn(false)} title="⚠️ Übung noch nicht fertig">
+          <div className="space-y-4">
+            <p className="text-white/75"><b>{ex.name}</b> ist noch nicht komplett ausgefüllt und abgehakt. Trotzdem zur nächsten Übung?</p>
+            <div className="flex gap-2">
+              <button className="btn-primary flex-1" onClick={() => setNextWarn(false)}>Hier bleiben</button>
+              <button className="btn-ghost flex-1" onClick={gotoNext}>Trotzdem weiter</button>
+            </div>
           </div>
         </Modal>
       )}
@@ -649,6 +676,22 @@ function SumBox({ icon, v, l }: { icon: string; v: string; l: string }) {
       <span className="text-xs text-white/50">{l}</span>
     </div>
   )
+}
+
+function LastHint({ row, unit }: { row: Row; unit: string }) {
+  const lr = row.lastReps as number
+  const lw = row.lastWeight
+  const wTxt = lw != null ? `${fmtWeight(lw, unit)} × ` : ''
+  if (row.reps == null) {
+    return <p className="text-[11px] mt-0.5 px-1 text-red-300/90">🎯 Letztes Mal {wTxt}{lr} – schlag die {lr}!</p>
+  }
+  if (row.reps > lr) {
+    return <p className="text-[11px] mt-0.5 px-1 text-success">🔥 Stärker als letztes Mal! ({lr} → {row.reps})</p>
+  }
+  if (row.reps === lr) {
+    return <p className="text-[11px] mt-0.5 px-1 text-accent">Gleichstand mit letztem Mal ({lr}) – einer geht noch!</p>
+  }
+  return <p className="text-[11px] mt-0.5 px-1 text-red-300/90">🎯 Letztes Mal {wTxt}{lr} – noch {lr - row.reps + 1} bis zum Rekord</p>
 }
 
 function NumberStepper({ value, step, onChange, placeholder }:
