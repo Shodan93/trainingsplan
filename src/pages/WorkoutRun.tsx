@@ -45,8 +45,8 @@ export default function WorkoutRun() {
     xp: number; volume: number; streak: number; level: number; badges: Badge[]; tip: string
   }>(null)
 
-  // Dynamic Double Progression celebration
-  const [ddp, setDdp] = useState<null | { exId: string; name: string; current: number; suggested: number; unit: string }>(null)
+  // Dynamic Double Progression: Vorschlag Gewicht erhöhen (up) oder reduzieren (down)
+  const [ddp, setDdp] = useState<null | { exId: string; name: string; current: number; suggested: number; unit: string; direction: 'up' | 'down' }>(null)
   const celebrated = useRef<Set<string>>(new Set())
   const progressed = useRef<Set<string>>(new Set())
 
@@ -238,27 +238,35 @@ export default function WorkoutRun() {
     }
   }
 
-  // Dynamic Double Progression: alle Arbeitssätze erledigt UND alle am oberen Rep-Ende → feiern + Gewicht erhöhen
+  // Dynamic Double Progression: alle Sätze am oberen Ende → erhöhen (feiern);
+  // unter der Mindest-Range → reduzieren vorschlagen.
   function maybeCelebrateDDP(ex2: PlanExercise, list: Row[]) {
     if (celebrated.current.has(ex2.id)) return
     const allDone = list.every(r => r.completed)
-    const allTop = list.every(r => (r.reps ?? 0) >= ex2.rep_max)
     const weights = list.map(r => r.weight ?? 0).filter(w => w > 0)
-    if (!allDone || !allTop || !weights.length) return
+    if (!allDone || !weights.length) return
     const w = Math.max(...weights)
-    celebrated.current.add(ex2.id)
-    confetti()
-    if (settings?.sound_enabled) successSound()
-    if (settings?.vibration_enabled) vibrate([60, 40, 60, 40, 120])
+    const repsArr = list.map(r => r.reps ?? 0)
     const step = ex2.unit === 'kg' ? 2.5 : 5
-    setDdp({ exId: ex2.id, name: ex2.name, current: w, suggested: w + step, unit: ex2.unit })
+
+    if (repsArr.every(r => r >= ex2.rep_max)) {
+      celebrated.current.add(ex2.id)
+      confetti()
+      if (settings?.sound_enabled) successSound()
+      if (settings?.vibration_enabled) vibrate([60, 40, 60, 40, 120])
+      setDdp({ exId: ex2.id, name: ex2.name, current: w, suggested: w + step, unit: ex2.unit, direction: 'up' })
+    } else if (Math.min(...repsArr) < ex2.rep_min) {
+      celebrated.current.add(ex2.id)
+      if (settings?.vibration_enabled) vibrate(80)
+      setDdp({ exId: ex2.id, name: ex2.name, current: w, suggested: Math.max(0, w - step), unit: ex2.unit, direction: 'down' })
+    }
   }
 
-  async function applyIncrease() {
+  async function applyChange() {
     if (!ddp) return
     await setExerciseTargetWeight(ddp.exId, ddp.suggested)
     setExs(prev => prev.map(e => e.id === ddp.exId ? { ...e, target_weight: ddp.suggested } : e))
-    progressed.current.add(ddp.exId)
+    if (ddp.direction === 'up') progressed.current.add(ddp.exId)
     setDdp(null)
   }
 
@@ -387,9 +395,10 @@ export default function WorkoutRun() {
         {sug && (
           <div className={cls('mt-3 text-sm rounded-xl p-3 border',
             sug.action === 'increase' ? 'bg-success/10 border-success/30 text-green-200'
-              : sug.action === 'hold' ? 'bg-white/5 border-white/10 text-white/70'
-                : 'bg-primary/10 border-primary/20 text-sky-200')}>
-            📈 {sug.message}
+              : sug.action === 'decrease' ? 'bg-accent/10 border-accent/30 text-amber-200'
+                : sug.action === 'hold' ? 'bg-white/5 border-white/10 text-white/70'
+                  : 'bg-primary/10 border-primary/20 text-sky-200')}>
+            {sug.action === 'increase' ? '📈' : sug.action === 'decrease' ? '⬇️' : '💡'} {sug.message}
           </div>
         )}
 
@@ -483,29 +492,43 @@ export default function WorkoutRun() {
         </Modal>
       )}
 
-      {/* DDP celebration */}
+      {/* DDP-Vorschlag: erhöhen (up) oder reduzieren (down) */}
       {ddp && (
-        <Modal open onClose={() => setDdp(null)} title="🎉 Rep-Range geknackt!">
+        <Modal open onClose={() => setDdp(null)} title={ddp.direction === 'up' ? '🎉 Rep-Range geknackt!' : '⬇️ Unter der Rep-Range'}>
           <div className="space-y-4 text-center">
-            <p className="text-5xl animate-pop">📈🎊</p>
-            <p className="text-white/80">
-              Du hast bei <span className="font-bold text-white">{ddp.name}</span> alle Sätze am
-              oberen Ende der Wiederholungs-Range geschafft – <b>Dynamic Double Progression!</b>
-            </p>
-            <div className="card bg-success/10 border-success/30">
+            {ddp.direction === 'up' ? (
+              <>
+                <p className="text-5xl animate-pop">📈🎊</p>
+                <p className="text-white/80">
+                  Du hast bei <span className="font-bold text-white">{ddp.name}</span> alle Sätze am
+                  oberen Ende der Wiederholungs-Range geschafft – <b>Dynamic Double Progression!</b>
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-5xl animate-pop">⬇️</p>
+                <p className="text-white/80">
+                  Bei <span className="font-bold text-white">{ddp.name}</span> warst du unter der Mindest-Range.
+                  Reduziere das Gewicht, damit du wieder sauber im Zielbereich trainierst.
+                </p>
+              </>
+            )}
+            <div className={cls('card', ddp.direction === 'up' ? 'bg-success/10 border-success/30' : 'bg-accent/10 border-accent/30')}>
               <p className="text-sm text-white/60">Neues Arbeitsgewicht</p>
-              <p className="text-2xl font-extrabold text-success">
+              <p className={cls('text-2xl font-extrabold', ddp.direction === 'up' ? 'text-success' : 'text-accent')}>
                 {fmtWeight(ddp.current, ddp.unit)} → {fmtWeight(ddp.suggested, ddp.unit)}
               </p>
             </div>
             <div className="flex items-center justify-center gap-2">
-              <button className="btn-ghost !px-3" onClick={() => setDdp(d => d && { ...d, suggested: Math.max(d.current, d.suggested - (ddp.unit === 'kg' ? 2.5 : 5)) })}>−</button>
+              <button className="btn-ghost !px-3" onClick={() => setDdp(d => d && { ...d, suggested: Math.max(0, d.suggested - (ddp.unit === 'kg' ? 2.5 : 5)) })}>−</button>
               <span className="text-sm text-white/60">Gewicht anpassen</span>
               <button className="btn-ghost !px-3" onClick={() => setDdp(d => d && { ...d, suggested: d.suggested + (ddp.unit === 'kg' ? 2.5 : 5) })}>+</button>
             </div>
             <div className="flex gap-2">
               <button className="btn-ghost flex-1" onClick={() => setDdp(null)}>Später</button>
-              <button className="btn-accent flex-1" onClick={applyIncrease}>Gewicht erhöhen ✓</button>
+              <button className={cls('flex-1', ddp.direction === 'up' ? 'btn-accent' : 'btn-primary')} onClick={applyChange}>
+                {ddp.direction === 'up' ? 'Gewicht erhöhen ✓' : 'Gewicht reduzieren ✓'}
+              </button>
             </div>
           </div>
         </Modal>
