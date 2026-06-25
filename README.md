@@ -48,7 +48,7 @@ npm run build          # Produktion nach dist/
 1. Cloudflare → Workers & Pages → Create → Pages → Connect to Git → `shodan93/trainingsplan`.
 2. Build command `npm run build`, Output `dist`, Framework „Vite".
 3. Environment-Variablen `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` setzen.
-4. Custom domain `trainingsplan.mumelter.de` hinzufügen.
+4. Custom domain `trainingsplan.mumelter.org` hinzufügen.
 
 ## Datenbank
 
