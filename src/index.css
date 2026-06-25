@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0b1020;
+  color: #e7ecf5;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* Safe-area helpers for mobile (notch / home indicator) */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0px); }
+
+@layer components {
+  .card {
+    @apply bg-surface rounded-2xl p-4 shadow-lg shadow-black/20 border border-white/5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition active:scale-95 disabled:opacity-50 disabled:active:scale-100 select-none;
+  }
+  .btn-primary { @apply btn bg-primary text-white hover:bg-sky-400; }
+  .btn-accent  { @apply btn bg-accent text-black hover:bg-amber-400; }
+  .btn-ghost   { @apply btn bg-white/5 text-white hover:bg-white/10; }
+  .btn-danger  { @apply btn bg-danger/90 text-white hover:bg-danger; }
+  .input {
+    @apply w-full bg-surface2 border border-white/10 rounded-xl px-3 py-2.5 text-white
+           placeholder-white/30 outline-none focus:border-primary focus:ring-2 focus:ring-primary/30;
+  }
+  .label { @apply text-xs font-medium text-white/50 mb-1 block; }
+  .chip { @apply text-xs px-2 py-0.5 rounded-full font-medium; }
+}
+
+/* number inputs without spinners */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #2a3454; border-radius: 8px; }
