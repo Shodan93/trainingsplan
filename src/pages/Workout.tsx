@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { getActivePlan, getDays, getDayExercises, startSession } from '../lib/db'
-import { Plan, PlanDay, PlanExercise } from '../lib/types'
+import { getActivePlan, getDays, getDayExercises, startSession, getOpenSession } from '../lib/db'
+import { Plan, PlanDay, PlanExercise, WorkoutSession } from '../lib/types'
 import { Spinner, EmptyState } from '../components/ui'
 import { cls } from '../lib/utils'
 
@@ -17,12 +17,13 @@ export default function WorkoutPicker() {
   const [loading, setLoading] = useState(true)
   const [deload, setDeload] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState<WorkoutSession | null>(null)
 
   useEffect(() => {
     if (!profile) return
     ;(async () => {
-      const pl = await getActivePlan(profile.id)
-      setPlan(pl)
+      const [pl, openS] = await Promise.all([getActivePlan(profile.id), getOpenSession(profile.id)])
+      setPlan(pl); setOpen(openS)
       if (pl) {
         const d = await getDays(pl.id)
         setDays(d)
@@ -38,6 +39,8 @@ export default function WorkoutPicker() {
   async function start(day: PlanDay) {
     if (!profile || !plan) return
     setBusy(true)
+    // Offene Session für denselben Tag fortsetzen statt doppelt anzulegen
+    if (open && open.plan_day_id === day.id) { nav(`/workout/run/${open.id}`); return }
     const session = await startSession({
       user_id: profile.id, plan_id: plan.id, plan_day_id: day.id,
       day_title: `${day.weekday} · ${day.title}`, is_deload: deload
@@ -56,6 +59,17 @@ export default function WorkoutPicker() {
         <EmptyState icon="📋" title="Kein aktiver Plan" hint={'Lege zuerst im Tab „Plan“ einen Plan an.'} />
       ) : (
         <>
+          {open && (
+            <button onClick={() => nav(`/workout/run/${open.id}`)}
+              className="card w-full text-left border-accent/40 bg-accent/10 flex items-center justify-between active:scale-[0.99]">
+              <div>
+                <p className="font-bold text-accent">▶ Laufendes Training fortsetzen</p>
+                <p className="text-xs text-white/55 mt-0.5">{open.day_title}</p>
+              </div>
+              <span className="text-2xl">↩︎</span>
+            </button>
+          )}
+
           <label className="card flex items-center justify-between cursor-pointer">
             <div>
               <p className="font-semibold">🧘 Deload-Woche</p>

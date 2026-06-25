@@ -120,6 +120,15 @@ export async function recomputeSessionVolume(sessionId: string): Promise<number>
 export async function setExerciseTargetWeight(planExerciseId: string, weight: number) {
   await supabase.from('plan_exercises').update({ target_weight: weight }).eq('id', planExerciseId)
 }
+// Open (not yet finished) session, for resume
+export async function getOpenSession(uid: string): Promise<WorkoutSession | null> {
+  const { data } = await supabase
+    .from('workout_sessions').select('*')
+    .eq('user_id', uid).is('completed_at', null)
+    .order('started_at', { ascending: false }).limit(1).maybeSingle()
+  return data as WorkoutSession | null
+}
+
 export async function getSessions(uid: string, limit = 50): Promise<WorkoutSession[]> {
   const { data } = await supabase
     .from('workout_sessions').select('*')
