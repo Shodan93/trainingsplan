@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import {
   getSessions, setLogsForSessions, deleteSession,
-  getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume
+  getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume, recomputeStats
 } from '../lib/db'
 import { WorkoutSession, SetLog } from '../lib/types'
 import { Spinner, EmptyState, Modal } from '../components/ui'
@@ -38,15 +38,18 @@ export default function History() {
       ) : (
         <div className="space-y-2">
           {sessions.map(s => (
-            <button key={s.id} onClick={() => setEditSession(s)} className="card w-full text-left active:scale-[0.99]">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold truncate">{s.day_title ?? 'Training'} {s.is_deload && '🧘'}</p>
-                <span className="text-xs text-white/40 shrink-0">{fmtDate(s.completed_at ?? s.started_at)}</span>
+            <button key={s.id} onClick={() => setEditSession(s)} className="card w-full text-left active:scale-[0.99] flex gap-3 items-start">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold truncate">{s.day_title ?? 'Training'} {s.is_deload && '🧘'}</p>
+                  <span className="text-xs text-white/40 shrink-0">{fmtDate(s.completed_at ?? s.started_at)}</span>
+                </div>
+                <p className="text-xs text-white/45 mt-0.5">
+                  {fmtDuration(s.duration_seconds)} · {Math.round(Number(s.total_volume)).toLocaleString('de-DE')} kg · {counts[s.id] ?? 0} Sätze · +{s.xp_earned} XP
+                </p>
+                {s.notes && <p className="text-xs text-white/55 mt-1 line-clamp-2">📔 {s.notes}</p>}
               </div>
-              <p className="text-xs text-white/45 mt-0.5">
-                {fmtDuration(s.duration_seconds)} · {Math.round(Number(s.total_volume)).toLocaleString('de-DE')} kg · {counts[s.id] ?? 0} Sätze · +{s.xp_earned} XP
-              </p>
-              {(s.notes || s.mood) && <p className="text-xs text-white/55 mt-1 line-clamp-2">📔 {moodEmoji(s.mood)} {s.notes}</p>}
+              {s.mood && <span className="text-3xl leading-none shrink-0" title="Bewertung">{moodEmoji(s.mood)}</span>}
             </button>
           ))}
         </div>
@@ -133,7 +136,7 @@ function SessionEditor({ session, onClose, onChanged }:
             <textarea className="input min-h-[70px]" value={notes} onChange={e => setNotes(e.target.value)} />
           </div>
           <div className="flex gap-2">
-            <button className="btn-danger" onClick={async () => { if (confirm('Ganzes Training löschen?')) { await deleteSession(session.id); onChanged() } }}>Löschen</button>
+            <button className="btn-danger" onClick={async () => { if (confirm('Ganzes Training löschen?')) { await deleteSession(session.id); await recomputeStats(session.user_id); onChanged() } }}>Löschen</button>
             <button className="btn-primary flex-1" disabled={busy} onClick={save}>{busy ? 'Speichern…' : 'Speichern'}</button>
           </div>
         </div>

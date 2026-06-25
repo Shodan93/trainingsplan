@@ -23,6 +23,22 @@ export async function getStats(uid: string): Promise<UserStats | null> {
   const { data } = await supabase.from('user_stats').select('*').eq('user_id', uid).single()
   return data as UserStats | null
 }
+export async function recomputeStats(uid: string) {
+  await supabase.rpc('recompute_user_stats', { p_uid: uid })
+}
+// Abgeschlossene Workouts in einer Woche (robust aus den Sessions, kein Counter)
+export async function countCompletedSessionsInWeek(uid: string, weekStartISO: string): Promise<number> {
+  const end = new Date(weekStartISO)
+  end.setDate(end.getDate() + 7)
+  const { count } = await supabase
+    .from('workout_sessions')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', uid)
+    .not('completed_at', 'is', null)
+    .gte('completed_at', weekStartISO)
+    .lt('completed_at', end.toISOString().slice(0, 10))
+  return count ?? 0
+}
 
 export async function getActivePlan(uid: string): Promise<Plan | null> {
   const { data } = await supabase
@@ -61,6 +77,11 @@ export async function addExercise(ex: Partial<PlanExercise>) {
 }
 export async function deleteExercise(id: string) {
   await supabase.from('plan_exercises').delete().eq('id', id)
+}
+// Reihenfolge speichern: sort_order anhand der übergebenen ID-Reihenfolge setzen
+export async function reorderExercises(ids: string[]) {
+  await Promise.all(ids.map((id, i) =>
+    supabase.from('plan_exercises').update({ sort_order: i + 1 }).eq('id', id)))
 }
 export async function addDay(day: Partial<PlanDay>) {
   const { data } = await supabase.from('plan_days').insert(day).select().single()

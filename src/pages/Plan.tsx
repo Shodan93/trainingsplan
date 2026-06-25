@@ -2,11 +2,16 @@ import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../lib/auth'
 import {
   getProfiles, getActivePlan, getDays, getDayExercises,
-  updatePlan, updateExercise, addExercise, deleteExercise, addDay, updateDay, deleteDay
+  updatePlan, updateExercise, addExercise, deleteExercise, addDay, updateDay, deleteDay, reorderExercises
 } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { Spinner, Modal, Chip, EmptyState } from '../components/ui'
 import { fmtWeight, cls, parseNum } from '../lib/utils'
+import {
+  DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, DragEndEvent
+} from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const COLORS = ['🟠', '🟢', '🔵', '🟣', '🩷', '🟡', '🔴', '⚪']
 const GROUPS = Object.keys(MUSCLE_LABELS)
@@ -53,6 +58,23 @@ export default function PlanPage() {
 
   useEffect(() => { if (viewId) load(viewId) }, [viewId, load])
 
+  // Drag & Drop: lange auf eine Übung tippen und verschieben (mobil + Desktop)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } })
+  )
+  function handleDragEnd(dayId: string, e: DragEndEvent) {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const list = exByDay[dayId] ?? []
+    const oldI = list.findIndex(x => x.id === active.id)
+    const newI = list.findIndex(x => x.id === over.id)
+    if (oldI < 0 || newI < 0) return
+    const newList = arrayMove(list, oldI, newI)
+    setExByDay(prev => ({ ...prev, [dayId]: newList }))
+    reorderExercises(newList.map(x => x.id))
+  }
+
   if (loading && !plan) return <Spinner label="Lade Plan…" />
 
   return (
@@ -82,11 +104,11 @@ export default function PlanPage() {
         <EmptyState icon="📋" title="Noch kein Plan" hint={isOwn ? 'Lege unten einen Tag an, um zu starten.' : ''} />
       ) : (
         <>
-          {/* Plan header */}
+          {/* Plan-Info (Name dezent – Trainings werden über Tag + Hauptübung benannt) */}
           <div className="card">
             <div className="flex items-start justify-between gap-2">
-              <h2 className="text-lg font-bold">{plan.name}</h2>
-              {isOwn && edit && <button className="btn-ghost !px-2 !py-1 text-sm" onClick={() => setEditPlanMeta(true)}>✏️</button>}
+              <p className="text-xs uppercase tracking-wide text-white/40">{plan.name}</p>
+              {isOwn && edit && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditPlanMeta(true)}>✏️</button>}
             </div>
             {plan.progression_note && <p className="text-xs text-white/55 mt-2 leading-relaxed">{plan.progression_note}</p>}
             {plan.color_legend && (
@@ -107,21 +129,35 @@ export default function PlanPage() {
           {days.map(day => {
             const list = exByDay[day.id] ?? []
             const isOpen = openDay === day.id
+            const mainEx = list[0]?.name
             return (
               <div key={day.id} className="card !p-0 overflow-hidden">
                 <button className="w-full flex items-center justify-between p-4" onClick={() => setOpenDay(isOpen ? null : day.id)}>
-                  <div className="text-left">
-                    <p className="font-bold">{day.weekday} · {day.title}</p>
+                  <div className="text-left min-w-0">
+                    <p className="font-bold truncate">{day.weekday} · {day.title}</p>
                     <p className="text-xs text-white/45">{day.effort} · {list.length} Übungen</p>
+                    {mainEx && <p className="text-xs text-primary/80 mt-0.5 truncate">🏋️ {mainEx}</p>}
                   </div>
-                  <span className={cls('transition-transform text-white/40', isOpen && 'rotate-180')}>▾</span>
+                  <span className={cls('transition-transform text-white/40 shrink-0', isOpen && 'rotate-180')}>▾</span>
                 </button>
                 {isOpen && (
                   <div className="px-3 pb-3 space-y-2">
-                    {list.map(ex => (
-                      <ExerciseRow key={ex.id} ex={ex} edit={edit && isOwn}
-                        onEdit={() => setEditEx(ex)} />
-                    ))}
+                    {edit && isOwn && list.length > 1 && (
+                      <p className="text-[11px] text-white/40 px-1">↕︎ Übung gedrückt halten und verschieben, um die Reihenfolge zu ändern.</p>
+                    )}
+                    {edit && isOwn ? (
+                      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleDragEnd(day.id, e)}>
+                        <SortableContext items={list.map(x => x.id)} strategy={verticalListSortingStrategy}>
+                          {list.map(ex => (
+                            <SortableExercise key={ex.id} ex={ex} onEdit={() => setEditEx(ex)} />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
+                    ) : (
+                      list.map(ex => (
+                        <ExerciseRow key={ex.id} ex={ex} edit={false} onEdit={() => setEditEx(ex)} />
+                      ))
+                    )}
                     {edit && isOwn && (
                       <button className="btn-ghost w-full text-sm" onClick={() => setEditEx({
                         id: '', plan_day_id: day.id, exercise_id: null, name: '', muscle_group: 'other',
@@ -170,9 +206,26 @@ export default function PlanPage() {
   )
 }
 
-function ExerciseRow({ ex, edit, onEdit }: { ex: PlanExercise; edit: boolean; onEdit: () => void }) {
+function SortableExercise({ ex, onEdit }: { ex: PlanExercise; onEdit: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: ex.id })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 20 : undefined,
+    touchAction: 'manipulation'
+  }
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <ExerciseRow ex={ex} edit onEdit={onEdit} grip />
+    </div>
+  )
+}
+
+function ExerciseRow({ ex, edit, onEdit, grip }: { ex: PlanExercise; edit: boolean; onEdit: () => void; grip?: boolean }) {
   return (
     <div className="bg-surface2 rounded-xl p-3 flex items-start gap-3" style={{ borderLeft: `3px solid ${MUSCLE_HEX[ex.muscle_group] ?? '#64748b'}` }}>
+      {grip && <span className="text-white/30 text-lg leading-none mt-0.5 select-none" aria-hidden>⠿</span>}
       <span className="text-lg leading-none mt-0.5">{ex.color}</span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -186,7 +239,7 @@ function ExerciseRow({ ex, edit, onEdit }: { ex: PlanExercise; edit: boolean; on
         </p>
         {ex.cue && <p className="text-xs text-white/40 mt-1 leading-snug">{ex.cue}</p>}
       </div>
-      {edit && <button className="btn-ghost !px-2 !py-1 text-sm shrink-0" onClick={onEdit}>✏️</button>}
+      {edit && <button className="btn-ghost !px-2 !py-1 text-sm shrink-0" onPointerDown={e => e.stopPropagation()} onClick={onEdit}>✏️</button>}
     </div>
   )
 }

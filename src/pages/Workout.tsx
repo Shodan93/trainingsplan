@@ -14,6 +14,7 @@ export default function WorkoutPicker() {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [days, setDays] = useState<PlanDay[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [mains, setMains] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [deload, setDeload] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -29,8 +30,12 @@ export default function WorkoutPicker() {
         setDays(d)
         const ex = await getDayExercises(d.map(x => x.id))
         const c: Record<string, number> = {}
-        ex.forEach((e: PlanExercise) => { c[e.plan_day_id] = (c[e.plan_day_id] ?? 0) + 1 })
-        setCounts(c)
+        const m: Record<string, string> = {}
+        ex.forEach((e: PlanExercise) => {
+          c[e.plan_day_id] = (c[e.plan_day_id] ?? 0) + 1
+          if (!m[e.plan_day_id]) m[e.plan_day_id] = e.name
+        })
+        setCounts(c); setMains(m)
       }
       setLoading(false)
     })()
@@ -99,6 +104,7 @@ export default function WorkoutPicker() {
                     {today && <span className="chip bg-primary/20 text-primary">heute</span>}
                   </p>
                   <p className="text-xs text-white/45 mt-0.5">{day.effort} · {counts[day.id] ?? 0} Übungen</p>
+                  {mains[day.id] && <p className="text-xs text-primary/80 mt-0.5">🏋️ {mains[day.id]}</p>}
                 </div>
                 <span className="text-2xl">▶</span>
               </button>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import {
   getStats, getActivePlan, getDays, getTips, getWeeklyTarget, ensureWeeklyTarget,
-  getProfiles, getOpenSession, deleteSession
+  getProfiles, getOpenSession, deleteSession, countCompletedSessionsInWeek
 } from '../lib/db'
 import { UserStats, Plan, PlanDay, MotivationTip, WeeklyTarget, Profile, WorkoutSession } from '../lib/types'
 import { greeting, levelProgress, isoWeekStart, cls, fmtDateTime } from '../lib/utils'
@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [days, setDays] = useState<PlanDay[]>([])
   const [tip, setTip] = useState<MotivationTip | null>(null)
   const [week, setWeek] = useState<WeeklyTarget | null>(null)
+  const [weekDone, setWeekDone] = useState(0)
   const [partners, setPartners] = useState<Profile[]>([])
   const [openSession, setOpenSession] = useState<WorkoutSession | null>(null)
   const [showResume, setShowResume] = useState(false)
@@ -44,6 +45,7 @@ export default function Dashboard() {
       }
       await ensureWeeklyTarget(profile.id, ws)
       setWeek(await getWeeklyTarget(profile.id, ws))
+      setWeekDone(await countCompletedSessionsInWeek(profile.id, ws))
       setLoading(false)
     })()
   }, [profile])
@@ -122,11 +124,11 @@ export default function Dashboard() {
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <p className="font-bold flex items-center gap-2">🎯 Wochenziel</p>
-            <span className={cls('chip', week.achieved ? 'bg-success/20 text-success' : 'bg-white/10 text-white/60')}>
-              {week.completed_workouts}/{week.target_workouts} {week.achieved ? '✓' : ''}
+            <span className={cls('chip', weekDone >= week.target_workouts ? 'bg-success/20 text-success' : 'bg-white/10 text-white/60')}>
+              {weekDone}/{week.target_workouts} {weekDone >= week.target_workouts ? '✓' : ''}
             </span>
           </div>
-          <ProgressBar pct={(week.completed_workouts / week.target_workouts) * 100} color="#22c55e" />
+          <ProgressBar pct={(weekDone / week.target_workouts) * 100} color="#22c55e" />
         </div>
       )}
 
