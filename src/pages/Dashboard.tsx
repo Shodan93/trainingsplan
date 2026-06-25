@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import {
   getStats, getActivePlan, getDays, getTips, getWeeklyTarget, ensureWeeklyTarget,
-  getProfiles
+  getProfiles, getOpenSession, deleteSession
 } from '../lib/db'
-import { UserStats, Plan, PlanDay, MotivationTip, WeeklyTarget, Profile } from '../lib/types'
-import { greeting, levelProgress, isoWeekStart, cls } from '../lib/utils'
-import { Spinner, ProgressBar, Stat, Chip } from '../components/ui'
+import { UserStats, Plan, PlanDay, MotivationTip, WeeklyTarget, Profile, WorkoutSession } from '../lib/types'
+import { greeting, levelProgress, isoWeekStart, cls, fmtDateTime } from '../lib/utils'
+import { Spinner, ProgressBar, Stat, Chip, Modal } from '../components/ui'
 
 const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
 const CAT_LABEL: Record<string, string> = {
@@ -24,16 +24,19 @@ export default function Dashboard() {
   const [tip, setTip] = useState<MotivationTip | null>(null)
   const [week, setWeek] = useState<WeeklyTarget | null>(null)
   const [partners, setPartners] = useState<Profile[]>([])
+  const [openSession, setOpenSession] = useState<WorkoutSession | null>(null)
+  const [showResume, setShowResume] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!profile) return
     ;(async () => {
       const ws = isoWeekStart()
-      const [st, pl, tips, allProfiles] = await Promise.all([
-        getStats(profile.id), getActivePlan(profile.id), getTips(), getProfiles()
+      const [st, pl, tips, allProfiles, openS] = await Promise.all([
+        getStats(profile.id), getActivePlan(profile.id), getTips(), getProfiles(), getOpenSession(profile.id)
       ])
       setStats(st); setPlan(pl); setPartners(allProfiles.filter(p => p.id !== profile.id))
+      setOpenSession(openS); if (openS) setShowResume(true)
       if (pl) setDays(await getDays(pl.id))
       if (tips.length) {
         const idx = Math.floor(Date.now() / 86400000) % tips.length
@@ -60,6 +63,37 @@ export default function Dashboard() {
         <p className="text-white/50">{greeting()},</p>
         <h1 className="text-2xl font-extrabold">{profile?.avatar_emoji} {profile?.display_name}</h1>
       </header>
+
+      {/* Laufendes Training */}
+      {openSession && (
+        <button onClick={() => nav(`/workout/run/${openSession.id}`)}
+          className="card w-full text-left border-accent/50 bg-accent/10 flex items-center justify-between active:scale-[0.99]">
+          <div>
+            <p className="font-bold text-accent">▶ Laufendes Training fortsetzen</p>
+            <p className="text-xs text-white/55 mt-0.5">{openSession.day_title} · {fmtDateTime(openSession.started_at)}</p>
+          </div>
+          <span className="text-2xl">↩︎</span>
+        </button>
+      )}
+
+      {/* Wiedereinstiegs-Dialog */}
+      {openSession && (
+        <Modal open={showResume} onClose={() => setShowResume(false)} title="🏋️ Laufendes Training gefunden">
+          <div className="space-y-4">
+            <p className="text-white/75">
+              Du hast ein nicht beendetes Training: <b>{openSession.day_title}</b>
+              <span className="text-white/45"> · gestartet {fmtDateTime(openSession.started_at)}</span>.
+              Deine bereits eingetragenen Sätze sind gespeichert.
+            </p>
+            <div className="flex gap-2">
+              <button className="btn-ghost flex-1" onClick={async () => {
+                if (confirm('Training wirklich verwerfen?')) { await deleteSession(openSession.id); setOpenSession(null); setShowResume(false) }
+              }}>Verwerfen</button>
+              <button className="btn-primary flex-1" onClick={() => nav(`/workout/run/${openSession.id}`)}>Fortsetzen</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Level + XP */}
       <div className="card">
