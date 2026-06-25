@@ -31,6 +31,7 @@ export default function WorkoutRun() {
   const rowsRef = useRef<Record<string, Row[]>>({})
   const persistTimers = useRef<Record<string, number>>({})
   const [sugs, setSugs] = useState<Record<string, Sug>>({})
+  const [lastCounts, setLastCounts] = useState<Record<string, number>>({})
   const [idx, setIdx] = useState(0)
   const [loading, setLoading] = useState(true)
 
@@ -89,12 +90,14 @@ export default function WorkoutRun() {
 
     const r: Record<string, Row[]> = {}
     const sg: Record<string, Sug> = {}
+    const lc: Record<string, number> = {}
     await Promise.all(list.map(async (ex) => {
       const [last, sug] = await Promise.all([
         lastSetsForExercise(ex.id),
         ddpSuggestion(ex.id).catch(() => null)
       ])
       if (sug) sg[ex.id] = sug
+      lc[ex.id] = last.length
       r[ex.id] = Array.from({ length: ex.sets }, (_, i) => {
         const prev = last[i]
         const lastWeight = prev?.weight ?? null
@@ -111,7 +114,7 @@ export default function WorkoutRun() {
         return { weight: w, reps: null, completed: false, failure: false, lastWeight, lastReps }
       })
     }))
-    setRows(r); rowsRef.current = r; setSugs(sg); setLoading(false)
+    setRows(r); rowsRef.current = r; setSugs(sg); setLastCounts(lc); setLoading(false)
   }, [sessionId, profile])
 
   useEffect(() => { load() }, [load])
@@ -474,6 +477,14 @@ export default function WorkoutRun() {
               {row.lastReps != null && <LastHint row={row} unit={ex.unit} />}
             </div>
           ))}
+          {(() => {
+            const lc = lastCounts[ex.id] ?? 0
+            if (lc <= 0) return null
+            const done = (rows[ex.id] ?? []).filter(r => r.completed).length
+            return done >= lc
+              ? <p className="text-sm px-1 text-success font-semibold animate-pop">✅ Erfolg! {done}/{lc} Sätze – mindestens so viel wie letztes Mal 💪</p>
+              : <p className="text-xs px-1 text-white/45">Sätze: {done}/{lc} · letztes Mal {lc} – schaff sie alle für den Erfolg</p>
+          })()}
           {repHint?.startsWith(`${ex.id}|`) && (
             <p className="text-danger text-sm px-1 animate-pop">⚠️ Bitte zuerst die Wiederholungen eintragen, dann abhaken.</p>
           )}
@@ -683,15 +694,15 @@ function LastHint({ row, unit }: { row: Row; unit: string }) {
   const lw = row.lastWeight
   const wTxt = lw != null ? `${fmtWeight(lw, unit)} × ` : ''
   if (row.reps == null) {
-    return <p className="text-[11px] mt-0.5 px-1 text-red-300/90">🎯 Letztes Mal {wTxt}{lr} – schlag die {lr}!</p>
+    return <p className="text-[11px] mt-0.5 px-1 text-red-300/90">🎯 Letztes Mal {wTxt}{lr} – mindestens {lr} halten!</p>
   }
   if (row.reps > lr) {
-    return <p className="text-[11px] mt-0.5 px-1 text-success">🔥 Stärker als letztes Mal! ({lr} → {row.reps})</p>
+    return <p className="text-[11px] mt-0.5 px-1 text-success">🔥 Sogar mehr als letztes Mal! ({lr} → {row.reps})</p>
   }
   if (row.reps === lr) {
-    return <p className="text-[11px] mt-0.5 px-1 text-accent">Gleichstand mit letztem Mal ({lr}) – einer geht noch!</p>
+    return <p className="text-[11px] mt-0.5 px-1 text-success">✅ Rep-Range gehalten – stark! ({lr})</p>
   }
-  return <p className="text-[11px] mt-0.5 px-1 text-red-300/90">🎯 Letztes Mal {wTxt}{lr} – noch {lr - row.reps + 1} bis zum Rekord</p>
+  return <p className="text-[11px] mt-0.5 px-1 text-red-300/90">🎯 Letztes Mal {wTxt}{lr} – noch {lr - row.reps} bis dahin</p>
 }
 
 function NumberStepper({ value, step, onChange, placeholder }:
