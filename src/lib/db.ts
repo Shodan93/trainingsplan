@@ -125,6 +125,11 @@ export async function deleteSetLogByNumber(sessionId: string, planExerciseId: st
   await supabase.from('set_logs').delete()
     .eq('session_id', sessionId).eq('plan_exercise_id', planExerciseId).eq('set_number', setNumber)
 }
+// Alle Logs einer Übung in der Session löschen (für Resync nach Satz-Löschung)
+export async function deleteAllSetLogsForExercise(sessionId: string, planExerciseId: string) {
+  await supabase.from('set_logs').delete()
+    .eq('session_id', sessionId).eq('plan_exercise_id', planExerciseId)
+}
 // Übungsnamen in den Logs der laufenden Session mit umbenennen
 export async function renameSessionExercise(sessionId: string, planExerciseId: string, name: string) {
   await supabase.from('set_logs').update({ exercise_name: name })

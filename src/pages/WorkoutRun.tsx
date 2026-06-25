@@ -6,7 +6,7 @@ import {
   getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
   ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
   setExerciseTargetWeight, addDiary, getSessionLogs,
-  updateExercise, deleteSetLogByNumber, renameSessionExercise
+  updateExercise, renameSessionExercise, deleteAllSetLogsForExercise
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge, SetLog } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
@@ -188,15 +188,26 @@ export default function WorkoutRun() {
     setExs(prev => prev.map(e => e.id === ex.id ? { ...e, sets: updated.length } : e))
     await updateExercise(ex.id, { sets: updated.length })
   }
-  async function removeSet() {
+  // Einzelnen Satz löschen + Logs mit neuen Satznummern resyncen
+  async function removeSetAt(i: number) {
     if (!ex) return
     const list = rows[ex.id] ?? []
     if (list.length <= 1) return
-    const removedNumber = list.length
-    const updated = list.slice(0, -1)
+    const updated = list.filter((_, j) => j !== i)
     setRows(p => { const c = { ...p, [ex.id]: updated }; rowsRef.current = c; return c })
     setExs(prev => prev.map(e => e.id === ex.id ? { ...e, sets: updated.length } : e))
-    await deleteSetLogByNumber(sessionId!, ex.id, removedNumber)
+    await deleteAllSetLogsForExercise(sessionId!, ex.id)
+    for (let j = 0; j < updated.length; j++) {
+      const r = updated[j]
+      if (r.completed || r.weight != null || r.reps != null) {
+        await saveSetLog({
+          session_id: sessionId!, plan_exercise_id: ex.id, exercise_name: ex.name,
+          muscle_group: ex.muscle_group, set_number: j + 1,
+          target_rep_min: ex.rep_min, target_rep_max: ex.rep_max,
+          weight: r.weight, reps: r.reps, is_failure: r.failure, completed: r.completed, rest_seconds: restTotal
+        })
+      }
+    }
     await updateExercise(ex.id, { sets: updated.length })
   }
   async function saveName() {
@@ -441,13 +452,13 @@ export default function WorkoutRun() {
 
         {/* Sets */}
         <div className="mt-5 space-y-2">
-          <div className="grid grid-cols-[2rem_1fr_1fr_3rem] gap-2 px-1 text-[11px] text-white/40 font-medium">
-            <span>Satz</span><span>Gewicht ({ex.unit})</span><span>Reps</span><span className="text-center">✓</span>
+          <div className="grid grid-cols-[1.4rem_1fr_1fr_2.4rem_1.4rem] gap-1.5 px-1 text-[11px] text-white/40 font-medium">
+            <span>#</span><span>Gewicht ({ex.unit})</span><span>Reps</span><span className="text-center">✓</span><span></span>
           </div>
           {(rows[ex.id] ?? []).map((row, i) => (
-            <div key={i} className={cls('grid grid-cols-[2rem_1fr_1fr_3rem] gap-2 items-center rounded-xl p-2 transition',
+            <div key={i} className={cls('grid grid-cols-[1.4rem_1fr_1fr_2.4rem_1.4rem] gap-1.5 items-center rounded-xl p-2 transition',
               row.completed ? 'bg-success/15 border border-success/30' : 'bg-surface2')}>
-              <span className="text-center font-bold text-white/60">{i + 1}</span>
+              <span className="text-center font-bold text-white/60 text-sm">{i + 1}</span>
               <NumberStepper value={row.weight} step={ex.unit === 'kg' ? 2.5 : 5}
                 onChange={(v) => updateRow(ex.id, i, { weight: v })} />
               <NumberStepper value={row.reps} step={1} placeholder={`${ex.rep_min}-${ex.rep_max}`}
@@ -457,15 +468,14 @@ export default function WorkoutRun() {
                   row.completed ? 'bg-success text-white' : 'bg-white/10 text-white/40')}>
                 {row.completed ? '✓' : '○'}
               </button>
+              <button onClick={() => removeSetAt(i)} disabled={(rows[ex.id]?.length ?? 0) <= 1}
+                className="text-white/30 disabled:opacity-20 active:scale-90 text-sm" title="Satz löschen">🗑️</button>
             </div>
           ))}
           {repHint?.startsWith(`${ex.id}|`) && (
             <p className="text-danger text-sm px-1 animate-pop">⚠️ Bitte zuerst die Wiederholungen eintragen, dann abhaken.</p>
           )}
-          <div className="flex gap-2 pt-1">
-            <button className="btn-ghost flex-1 text-sm" onClick={addSet}>+ Satz</button>
-            <button className="btn-ghost flex-1 text-sm" disabled={(rows[ex.id]?.length ?? 0) <= 1} onClick={removeSet}>− Satz</button>
-          </div>
+          <button className="btn-ghost w-full text-sm mt-1" onClick={addSet}>+ Satz hinzufügen</button>
           <label className="flex items-center gap-2 text-xs text-white/50 px-1 pt-1">
             <input type="checkbox"
               checked={(rows[ex.id] ?? []).slice(-1)[0]?.failure ?? false}
