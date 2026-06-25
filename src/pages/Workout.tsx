@@ -39,15 +39,21 @@ export default function WorkoutPicker() {
   async function start(day: PlanDay) {
     if (!profile || !plan) return
     setBusy(true)
-    // Offene Session für denselben Tag fortsetzen statt doppelt anzulegen
-    if (open && open.plan_day_id === day.id) { nav(`/workout/run/${open.id}`); return }
-    // Nur eine offene Session pro User: vorherige offene verwerfen
-    if (open) await deleteSession(open.id)
-    const session = await startSession({
-      user_id: profile.id, plan_id: plan.id, plan_day_id: day.id,
-      day_title: `${day.weekday} · ${day.title}`, is_deload: deload
-    })
-    nav(`/workout/run/${session.id}`)
+    try {
+      // Stand frisch prüfen (Constraint: nur eine offene Session pro User)
+      const current = await getOpenSession(profile.id)
+      if (current && current.plan_day_id === day.id) { nav(`/workout/run/${current.id}`); return }
+      if (current) await deleteSession(current.id)
+      const session = await startSession({
+        user_id: profile.id, plan_id: plan.id, plan_day_id: day.id,
+        day_title: `${day.weekday} · ${day.title}`, is_deload: deload
+      })
+      nav(`/workout/run/${session.id}`)
+    } catch (e) {
+      console.error(e)
+      setBusy(false)
+      alert('Training konnte nicht gestartet werden. Bitte erneut versuchen.')
+    }
   }
 
   if (loading) return <Spinner label="Lade Training…" />
