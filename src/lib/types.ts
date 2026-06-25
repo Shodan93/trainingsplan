@@ -78,6 +78,7 @@ export type WorkoutSession = {
   total_volume: number
   xp_earned: number
   notes: string | null
+  mood: number | null
 }
 
 export type SetLog = {

@@ -6,7 +6,7 @@ import {
 } from '../lib/db'
 import { WorkoutSession, SetLog } from '../lib/types'
 import { Spinner, EmptyState, Modal } from '../components/ui'
-import { fmtDate, fmtDuration, parseNum } from '../lib/utils'
+import { fmtDate, fmtDuration, parseNum, MOODS, moodEmoji, cls } from '../lib/utils'
 
 export default function History() {
   const { profile } = useAuth()
@@ -46,7 +46,7 @@ export default function History() {
               <p className="text-xs text-white/45 mt-0.5">
                 {fmtDuration(s.duration_seconds)} · {Math.round(Number(s.total_volume)).toLocaleString('de-DE')} kg · {counts[s.id] ?? 0} Sätze · +{s.xp_earned} XP
               </p>
-              {s.notes && <p className="text-xs text-white/55 mt-1 line-clamp-2">📔 {s.notes}</p>}
+              {(s.notes || s.mood) && <p className="text-xs text-white/55 mt-1 line-clamp-2">📔 {moodEmoji(s.mood)} {s.notes}</p>}
             </button>
           ))}
         </div>
@@ -63,6 +63,7 @@ function SessionEditor({ session, onClose, onChanged }:
   { session: WorkoutSession; onClose: () => void; onChanged: () => void }) {
   const [logs, setLogs] = useState<SetLog[]>([])
   const [notes, setNotes] = useState(session.notes ?? '')
+  const [mood, setMood] = useState<number | null>(session.mood ?? null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -82,7 +83,7 @@ function SessionEditor({ session, onClose, onChanged }:
     for (const l of logs) {
       await updateSetLogById(l.id, { weight: l.weight, reps: l.reps, completed: l.completed })
     }
-    await updateSession(session.id, { notes })
+    await updateSession(session.id, { notes: notes.trim() || null, mood })
     await recomputeSessionVolume(session.id)
     setBusy(false); onChanged()
   }
@@ -115,8 +116,21 @@ function SessionEditor({ session, onClose, onChanged }:
           ))}
           {!grouped.length && <p className="text-sm text-white/40">Keine Sätze geloggt.</p>}
           <div>
-            <label className="label">Notiz (Tagebuch)</label>
-            <textarea className="input min-h-[60px]" value={notes} onChange={e => setNotes(e.target.value)} />
+            <label className="label">Bewertung (Tagebuch)</label>
+            <div className="flex justify-between gap-1">
+              {MOODS.map(m => (
+                <button key={m.v} onClick={() => setMood(mood === m.v ? null : m.v)}
+                  className={cls('flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition active:scale-90',
+                    mood === m.v ? 'bg-primary/20 ring-2 ring-primary' : 'bg-white/5')}>
+                  <span className="text-2xl">{m.e}</span>
+                  <span className="text-[10px] text-white/50">{m.l}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="label">Notiz / Kommentar (Tagebuch)</label>
+            <textarea className="input min-h-[70px]" value={notes} onChange={e => setNotes(e.target.value)} />
           </div>
           <div className="flex gap-2">
             <button className="btn-danger" onClick={async () => { if (confirm('Ganzes Training löschen?')) { await deleteSession(session.id); onChanged() } }}>Löschen</button>

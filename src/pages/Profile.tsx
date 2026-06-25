@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
   getSettings, updateSettings, getStats, getBadges, getUserBadges,
   getGoals, upsertGoal, deleteGoal, getMeasurements, addMeasurement, deleteMeasurement,
-  getDiary, addDiary, deleteDiary, getWeeklyTarget, setWeeklyTargetCount, ensureWeeklyTarget
+  getDiary, addDiary, deleteDiary, getWeeklyTarget, setWeeklyTargetCount, ensureWeeklyTarget,
+  getSessions, updateSession
 } from '../lib/db'
 import {
-  Settings, UserStats, Badge, UserBadge, Goal, BodyMeasurement, DiaryEntry
+  Settings, UserStats, Badge, UserBadge, Goal, BodyMeasurement, DiaryEntry, WorkoutSession
 } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
-import { fmtDate, levelProgress, isoWeekStart, cls, todayISO } from '../lib/utils'
+import { fmtDate, levelProgress, isoWeekStart, cls, todayISO, MOODS, moodEmoji } from '../lib/utils'
 import { ensureNotifyPermission } from '../lib/notify'
 
 const AVATARS = ['💪', '🏋️', '🔥', '🦾', '🏃', '🧗', '⚡', '🦁', '🐺', '🌟']
@@ -183,29 +184,100 @@ function MeasureTab({ uid }: { uid: string }) {
   )
 }
 
+function MoodPicker({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  return (
+    <div className="flex justify-between gap-1">
+      {MOODS.map(m => (
+        <button key={m.v} onClick={() => onChange(value === m.v ? null : m.v)}
+          className={cls('flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition active:scale-90',
+            value === m.v ? 'bg-primary/20 ring-2 ring-primary' : 'bg-white/5')}>
+          <span className="text-2xl">{m.e}</span>
+          <span className="text-[10px] text-white/50">{m.l}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function DiaryTab({ uid }: { uid: string }) {
-  const [items, setItems] = useState<DiaryEntry[]>([])
+  const [entries, setEntries] = useState<DiaryEntry[]>([])
+  const [sessions, setSessions] = useState<WorkoutSession[]>([])
   const [text, setText] = useState('')
-  const load = () => getDiary(uid).then(setItems)
+  const [newMood, setNewMood] = useState<number | null>(null)
+  const [editS, setEditS] = useState<WorkoutSession | null>(null)
+
+  async function load() {
+    const [d, ss] = await Promise.all([getDiary(uid), getSessions(uid, 300)])
+    setEntries(d)
+    setSessions(ss.filter(s => (s.notes && s.notes.trim()) || s.mood))
+  }
   useEffect(() => { load() }, [uid])
+
+  const items = useMemo(() => {
+    const t = sessions.map(s => ({
+      kind: 't' as const, id: s.id, date: (s.completed_at ?? s.started_at).slice(0, 10),
+      title: s.day_title, mood: s.mood, content: s.notes, session: s
+    }))
+    const f = entries.map(e => ({
+      kind: 'f' as const, id: e.id, date: e.entry_date, mood: e.mood, content: e.content, title: null, session: null
+    }))
+    return [...t, ...f].sort((a, b) => b.date.localeCompare(a.date))
+  }, [sessions, entries])
+
   return (
     <div className="space-y-3">
       <div className="card">
-        <p className="text-xs text-white/50 mb-2">🔒 Privat – nur du siehst dein Tagebuch.</p>
-        <textarea className="input min-h-[80px]" value={text} onChange={e => setText(e.target.value)} placeholder="Wie war dein Training? Gedanken, Fortschritte…" />
-        <button className="btn-primary w-full mt-2" disabled={!text.trim()}
-          onClick={async () => { await addDiary({ user_id: uid, content: text.trim(), entry_date: todayISO() }); setText(''); load() }}>Eintrag speichern</button>
+        <p className="text-xs text-white/50 mb-2">🔒 Privat. Freier Eintrag – Trainings-Einträge erscheinen automatisch hier.</p>
+        <textarea className="input min-h-[70px]" value={text} onChange={e => setText(e.target.value)} placeholder="Gedanken, Fortschritte, Ernährung…" />
+        <div className="my-2"><MoodPicker value={newMood} onChange={setNewMood} /></div>
+        <button className="btn-primary w-full" disabled={!text.trim() && !newMood}
+          onClick={async () => { await addDiary({ user_id: uid, content: text.trim(), entry_date: todayISO(), mood: newMood ?? undefined }); setText(''); setNewMood(null); load() }}>
+          Eintrag speichern
+        </button>
       </div>
-      {items.map(e => (
-        <div key={e.id} className="card">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-white/45">{fmtDate(e.entry_date)}</span>
-            <button className="text-white/30 text-sm" onClick={async () => { await deleteDiary(e.id); load() }}>🗑️</button>
+
+      {items.map(it => (
+        it.kind === 't' ? (
+          <button key={'t' + it.id} onClick={() => setEditS(it.session!)} className="card w-full text-left active:scale-[0.99]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-primary">🏋️ {it.title}</span>
+              <span className="text-xs text-white/45">{fmtDate(it.date)}</span>
+            </div>
+            {(it.content || it.mood) && (
+              <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed mt-1">{moodEmoji(it.mood)} {it.content}</p>
+            )}
+            <p className="text-[10px] text-white/30 mt-1">Trainings-Eintrag · tippen zum Bearbeiten</p>
+          </button>
+        ) : (
+          <div key={'f' + it.id} className="card">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-white/45">📝 {fmtDate(it.date)}</span>
+              <button className="text-white/30 text-sm" onClick={async () => { await deleteDiary(it.id); load() }}>🗑️</button>
+            </div>
+            <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed">{moodEmoji(it.mood)} {it.content}</p>
           </div>
-          <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed">{e.content}</p>
-        </div>
+        )
       ))}
+
+      {editS && <TrainingEntryEditor session={editS} onClose={() => setEditS(null)} onSaved={() => { setEditS(null); load() }} />}
     </div>
+  )
+}
+
+function TrainingEntryEditor({ session, onClose, onSaved }: { session: WorkoutSession; onClose: () => void; onSaved: () => void }) {
+  const [notes, setNotes] = useState(session.notes ?? '')
+  const [mood, setMood] = useState<number | null>(session.mood ?? null)
+  return (
+    <Modal open onClose={onClose} title="Trainings-Eintrag">
+      <div className="space-y-3">
+        <p className="text-xs text-white/45">🏋️ {session.day_title} · {fmtDate(session.completed_at ?? session.started_at)}</p>
+        <div><label className="label">Bewertung</label><MoodPicker value={mood} onChange={setMood} /></div>
+        <div><label className="label">Notiz / Kommentar</label>
+          <textarea className="input min-h-[80px]" value={notes} onChange={e => setNotes(e.target.value)} /></div>
+        <button className="btn-primary w-full" onClick={async () => { await updateSession(session.id, { notes: notes.trim() || null, mood }); onSaved() }}>Speichern</button>
+        <p className="text-[11px] text-white/35 text-center">Dieser Eintrag gehört zum Training – Änderungen erscheinen auch im Verlauf.</p>
+      </div>
+    </Modal>
   )
 }
 

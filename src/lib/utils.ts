@@ -60,6 +60,17 @@ export function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Stimmungs-Bewertung (Tagebuch & Training – ein gemeinsames Modell)
+export const MOODS = [
+  { v: 1, e: '😣', l: 'mies' },
+  { v: 2, e: '😕', l: 'okay' },
+  { v: 3, e: '🙂', l: 'gut' },
+  { v: 4, e: '💪', l: 'stark' },
+  { v: 5, e: '🔥', l: 'top' }
+]
+export const moodEmoji = (m: number | null | undefined) => MOODS.find(x => x.v === m)?.e ?? ''
+export const moodLabel = (m: number | null | undefined) => MOODS.find(x => x.v === m)?.l ?? ''
+
 export function greeting() {
   const h = new Date().getHours()
   if (h < 11) return 'Guten Morgen'

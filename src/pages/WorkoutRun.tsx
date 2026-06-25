@@ -5,12 +5,12 @@ import { supabase } from '../lib/supabase'
 import {
   getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
   ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
-  setExerciseTargetWeight, addDiary, getSessionLogs,
+  setExerciseTargetWeight, getSessionLogs, updateSession,
   updateExercise, renameSessionExercise, deleteAllSetLogsForExercise
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge, SetLog } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
-import { cls, fmtWeight, isoWeekStart, vibrate, todayISO, parseNum } from '../lib/utils'
+import { cls, fmtWeight, isoWeekStart, vibrate, parseNum, MOODS } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
 import { evaluateBadges } from '../lib/gamification'
 import { confetti } from '../lib/confetti'
@@ -350,22 +350,10 @@ export default function WorkoutRun() {
     setSummary({ xp: res.xp_earned, volume: res.total_volume, streak: res.streak, level: res.level, badges: badgeObjs, tip })
   }
 
-  const MOODS = [
-    { v: 1, e: '😣', l: 'mies' },
-    { v: 2, e: '😕', l: 'okay' },
-    { v: 3, e: '🙂', l: 'gut' },
-    { v: 4, e: '💪', l: 'stark' },
-    { v: 5, e: '🔥', l: 'top' }
-  ]
-
   async function finishAndGoHome() {
-    if (profile && (mood || diaryText.trim()) && !savedDiary) {
-      const moodLabel = MOODS.find(m => m.v === mood)?.l
-      const parts = [`${session?.day_title ?? 'Training'} abgeschlossen`]
-      if (moodLabel) parts.push(`Gefühl: ${moodLabel}`)
-      const head = parts.join(' · ')
-      const content = diaryText.trim() ? `${head}\n${diaryText.trim()}` : head
-      await addDiary({ user_id: profile.id, content, entry_date: todayISO(), mood: mood ?? undefined })
+    // Bewertung + Notiz gehören zum Trainingsobjekt (= Tagebuch-Eintrag des Trainings)
+    if ((mood || diaryText.trim()) && !savedDiary) {
+      await updateSession(sessionId!, { notes: diaryText.trim() || null, mood: mood ?? null })
       setSavedDiary(true)
     }
     nav('/')
