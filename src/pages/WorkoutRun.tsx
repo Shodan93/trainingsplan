@@ -32,10 +32,12 @@ export default function WorkoutRun() {
   const [idx, setIdx] = useState(0)
   const [loading, setLoading] = useState(true)
 
-  // rest timer
+  // rest timer (timestamp-based, übersteht Throttling im Hintergrund)
   const [restTotal, setRestTotal] = useState(90)
   const [restLeft, setRestLeft] = useState<number | null>(null)
-  const tickRef = useRef<number | null>(null)
+  const [restEndAt, setRestEndAt] = useState<number | null>(null)
+  const firedRef = useRef(false)
+  const wakeRef = useRef<WakeLockSentinel | null>(null)
 
   // summary
   const [summary, setSummary] = useState<null | {
@@ -97,23 +99,50 @@ export default function WorkoutRun() {
 
   useEffect(() => { load() }, [load])
 
-  // timer tick
+  // timer tick – Restzeit aus Endzeitstempel berechnen
   useEffect(() => {
-    if (restLeft === null) return
-    if (restLeft <= 0) {
-      if (settings?.sound_enabled) timerDoneSound()
-      if (settings?.vibration_enabled) vibrate([200, 100, 200])
-      setRestLeft(null)
-      return
+    if (restEndAt === null) { setRestLeft(null); return }
+    const tick = () => {
+      const left = Math.max(0, Math.round((restEndAt - Date.now()) / 1000))
+      setRestLeft(left)
+      if (left <= 0 && !firedRef.current) {
+        firedRef.current = true
+        if (settings?.sound_enabled) timerDoneSound()
+        if (settings?.vibration_enabled) vibrate([300, 150, 300, 150, 400])
+        setRestEndAt(null); setRestLeft(null)
+      }
     }
-    tickRef.current = window.setTimeout(() => setRestLeft(v => (v ?? 0) - 1), 1000)
-    return () => { if (tickRef.current) clearTimeout(tickRef.current) }
-  }, [restLeft, settings])
+    tick()
+    const id = window.setInterval(tick, 250)
+    return () => clearInterval(id)
+  }, [restEndAt, settings])
 
-  function startRest() { setRestLeft(restTotal) }
+  // Screen Wake Lock: Bildschirm während des Trainings anlassen, damit der Timer läuft
+  useEffect(() => {
+    let active = true
+    async function acquire() {
+      try {
+        if ('wakeLock' in navigator && active) {
+          wakeRef.current = await navigator.wakeLock.request('screen')
+        }
+      } catch { /* z. B. wenn Tab nicht sichtbar – wird bei visibility neu versucht */ }
+    }
+    acquire()
+    const onVis = () => { if (document.visibilityState === 'visible') acquire() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      active = false
+      document.removeEventListener('visibilitychange', onVis)
+      wakeRef.current?.release?.().catch(() => {})
+      wakeRef.current = null
+    }
+  }, [])
+
+  function startRest() { firedRef.current = false; setRestEndAt(Date.now() + restTotal * 1000) }
+  function stopRest() { setRestEndAt(null); setRestLeft(null) }
   function adjustRest(delta: number) {
     setRestTotal(t => Math.max(15, t + delta))
-    if (restLeft !== null) setRestLeft(v => Math.max(1, (v ?? 0) + delta))
+    if (restEndAt !== null) setRestEndAt(e => (e ? e + delta * 1000 : e))
   }
 
   const ex = exs[idx]
@@ -357,7 +386,7 @@ export default function WorkoutRun() {
               </div>
               <button className="btn-ghost !px-3" onClick={() => adjustRest(-15)}>-15</button>
               <button className="btn-ghost !px-3" onClick={() => adjustRest(15)}>+15</button>
-              <button className="btn-primary !px-3" onClick={() => setRestLeft(null)}>Skip</button>
+              <button className="btn-primary !px-3" onClick={stopRest}>Skip</button>
             </div>
           ) : (
             <div className="flex items-center gap-3">
