@@ -7,7 +7,7 @@ import { useAuth } from '../lib/auth'
 import { getSessions, setLogsForSessions } from '../lib/db'
 import { WorkoutSession, SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { Spinner, EmptyState, Stat } from '../components/ui'
-import { fmtDate, isoWeekStart, MOODS } from '../lib/utils'
+import { fmtDate, fmtDuration, isoWeekStart, MOODS } from '../lib/utils'
 
 export default function Stats() {
   const { profile } = useAuth()
@@ -26,18 +26,43 @@ export default function Stats() {
   }
   useEffect(() => { load() }, [profile])
 
-  // weekly volume (last 8 weeks)
+  const setCountBySession = useMemo(() => {
+    const m: Record<string, number> = {}
+    logs.forEach(l => { m[l.session_id] = (m[l.session_id] ?? 0) + 1 })
+    return m
+  }, [logs])
+
+  // weekly volume / workouts / sets (last 8 weeks)
   const weekly = useMemo(() => {
-    const map: Record<string, { volume: number; count: number }> = {}
+    const map: Record<string, { volume: number; count: number; sets: number }> = {}
     sessions.forEach(s => {
       const wk = isoWeekStart(new Date(s.completed_at ?? s.started_at))
-      map[wk] ??= { volume: 0, count: 0 }
+      map[wk] ??= { volume: 0, count: 0, sets: 0 }
       map[wk].volume += Number(s.total_volume) || 0
       map[wk].count += 1
+      map[wk].sets += setCountBySession[s.id] ?? 0
     })
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).slice(-8)
-      .map(([wk, v]) => ({ week: fmtDate(wk).slice(0, 5), volume: Math.round(v.volume), count: v.count }))
+      .map(([wk, v]) => ({ week: fmtDate(wk).slice(0, 5), volume: Math.round(v.volume), count: v.count, sets: v.sets }))
+  }, [sessions, setCountBySession])
+
+  // kumulierter Volumenverlauf
+  const cumVolume = useMemo(() => {
+    const sorted = [...sessions].sort((a, b) => (a.completed_at ?? '').localeCompare(b.completed_at ?? ''))
+    let c = 0
+    return sorted.map(s => { c += Number(s.total_volume) || 0; return { date: fmtDate(s.completed_at ?? s.started_at).slice(0, 5), vol: Math.round(c) } })
   }, [sessions])
+
+  // Bestleistungen je Übung (max Gewicht)
+  const prs = useMemo(() => {
+    const m: Record<string, { weight: number; reps: number | null }> = {}
+    logs.forEach(l => {
+      if (l.weight == null) return
+      const w = Number(l.weight)
+      if (!m[l.exercise_name] || w > m[l.exercise_name].weight) m[l.exercise_name] = { weight: w, reps: l.reps }
+    })
+    return Object.entries(m).filter(([, v]) => v.weight > 0).sort((a, b) => b[1].weight - a[1].weight)
+  }, [logs])
 
   // muscle distribution (set count)
   const muscle = useMemo(() => {
@@ -102,8 +127,9 @@ export default function Stats() {
         </div>
       </div>
 
-      <div className="flex gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <Stat icon="🏆" value={sessions.length} label="Workouts" color="#22c55e" />
+        <Stat icon="⏱️" value={fmtDuration(Math.round(avgDur))} label="Ø Dauer" color="#a855f7" />
         <Stat icon="🏋️" value={`${(totalVolume / 1000).toFixed(1)}t`} label="Gesamtvolumen" color="#f59e0b" />
         <Stat icon="📅" value={thisMonth} label="diesen Monat" color="#0ea5e9" />
       </div>
@@ -120,6 +146,18 @@ export default function Stats() {
         </ResponsiveContainer>
       </Card>
 
+      <Card title="Volumenverlauf gesamt (kumuliert, kg)">
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={cumVolume}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+            <XAxis dataKey="date" tick={{ fill: '#ffffff60', fontSize: 11 }} />
+            <YAxis tick={{ fill: '#ffffff60', fontSize: 11 }} width={48} />
+            <Tooltip contentStyle={tipStyle} />
+            <Line type="monotone" dataKey="vol" stroke="#22c55e" strokeWidth={3} dot={false} name="kumuliert" />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+
       <Card title="Workouts pro Woche">
         <ResponsiveContainer width="100%" height={160}>
           <BarChart data={weekly}>
@@ -128,6 +166,18 @@ export default function Stats() {
             <YAxis allowDecimals={false} tick={{ fill: '#ffffff60', fontSize: 11 }} width={28} />
             <Tooltip contentStyle={tipStyle} cursor={{ fill: '#ffffff08' }} />
             <Bar dataKey="count" fill="#22c55e" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      <Card title="Sätze pro Woche">
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={weekly}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+            <XAxis dataKey="week" tick={{ fill: '#ffffff60', fontSize: 11 }} />
+            <YAxis allowDecimals={false} tick={{ fill: '#ffffff60', fontSize: 11 }} width={28} />
+            <Tooltip contentStyle={tipStyle} cursor={{ fill: '#ffffff08' }} />
+            <Bar dataKey="sets" fill="#a855f7" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </Card>
@@ -168,6 +218,19 @@ export default function Stats() {
           <p className="text-sm text-white/40 text-center py-6">Mehr Daten nötig – trainiere diese Übung mehrmals, um den Verlauf zu sehen.</p>
         )}
       </Card>
+
+      {prs.length > 0 && (
+        <Card title="🏅 Bestleistungen (Top-Gewicht je Übung)">
+          <div className="space-y-1.5">
+            {prs.map(([name, v]) => (
+              <div key={name} className="flex items-center justify-between text-sm">
+                <span className="text-white/80 truncate pr-2">{name}</span>
+                <span className="font-semibold text-accent shrink-0">{v.weight} kg{v.reps ? ` × ${v.reps}` : ''}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <p className="text-center text-xs text-white/35 pb-2">Einzelne Trainings findest du im Tab „Verlauf".</p>
     </div>

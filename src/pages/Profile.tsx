@@ -3,19 +3,19 @@ import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
   getSettings, updateSettings, getStats, getBadges, getUserBadges,
-  getGoals, upsertGoal, deleteGoal, getMeasurements, addMeasurement, deleteMeasurement,
-  getDiary, addDiary, deleteDiary, getWeeklyTarget, setWeeklyTargetCount, ensureWeeklyTarget,
+  getGoals, upsertGoal, deleteGoal,
+  getWeeklyTarget, setWeeklyTargetCount, ensureWeeklyTarget,
   getSessions, updateSession
 } from '../lib/db'
 import {
-  Settings, UserStats, Badge, UserBadge, Goal, BodyMeasurement, DiaryEntry, WorkoutSession
+  Settings, UserStats, Badge, UserBadge, Goal, WorkoutSession
 } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
 import { fmtDate, levelProgress, isoWeekStart, cls, todayISO, MOODS, moodEmoji } from '../lib/utils'
 import { ensureNotifyPermission } from '../lib/notify'
 
 const AVATARS = ['💪', '🏋️', '🔥', '🦾', '🏃', '🧗', '⚡', '🦁', '🐺', '🌟']
-const TABS = ['Übersicht', 'Ziele', 'Maße', 'Tagebuch', 'Einstellungen'] as const
+const TABS = ['Übersicht', 'Ziele', 'Tagebuch', 'Einstellungen'] as const
 type Tab = typeof TABS[number]
 
 export default function Profile() {
@@ -93,7 +93,6 @@ export default function Profile() {
       )}
 
       {tab === 'Ziele' && <GoalsTab uid={profile.id} />}
-      {tab === 'Maße' && <MeasureTab uid={profile.id} />}
       {tab === 'Tagebuch' && <DiaryTab uid={profile.id} />}
       {tab === 'Einstellungen' && settings && (
         <SettingsTab uid={profile.id} settings={settings} weekTarget={weekTarget}
@@ -145,45 +144,6 @@ function GoalsTab({ uid }: { uid: string }) {
   )
 }
 
-function MeasureTab({ uid }: { uid: string }) {
-  const [items, setItems] = useState<BodyMeasurement[]>([])
-  const [open, setOpen] = useState(false)
-  const [f, setF] = useState<Partial<BodyMeasurement>>({ metric: 'Körpergewicht', unit: 'kg', measured_at: todayISO() })
-  const load = () => getMeasurements(uid).then(setItems)
-  useEffect(() => { load() }, [uid])
-  return (
-    <div className="space-y-2">
-      {items.map(m => (
-        <div key={m.id} className="card flex items-center justify-between !py-3">
-          <div>
-            <p className="font-semibold">{m.metric}: <span className="text-accent">{m.value} {m.unit}</span></p>
-            <p className="text-xs text-white/45">{fmtDate(m.measured_at)}{m.note ? ` · ${m.note}` : ''}</p>
-          </div>
-          <button className="btn-ghost !px-2 !py-1 text-sm text-white/40" onClick={async () => { await deleteMeasurement(m.id); load() }}>🗑️</button>
-        </div>
-      ))}
-      <button className="btn-ghost w-full" onClick={() => { setF({ metric: 'Körpergewicht', unit: 'kg', measured_at: todayISO() }); setOpen(true) }}>+ Messung hinzufügen</button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Neue Messung">
-        <div className="space-y-3">
-          <div><label className="label">Was</label>
-            <input className="input" list="metrics" value={f.metric ?? ''} onChange={e => setF({ ...f, metric: e.target.value })} />
-            <datalist id="metrics">
-              {['Körpergewicht', 'Bizeps', 'Oberarm', 'Unterarm', 'Wade', 'Brust', 'Hüfte', 'Schulter', 'Oberschenkel'].map(x => <option key={x} value={x} />)}
-            </datalist>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div><label className="label">Wert</label><input className="input" type="number" step="0.1" onChange={e => setF({ ...f, value: +e.target.value })} /></div>
-            <div><label className="label">Einheit</label><select className="input" value={f.unit} onChange={e => setF({ ...f, unit: e.target.value })}><option>cm</option><option>kg</option><option>%</option></select></div>
-            <div><label className="label">Datum</label><input className="input" type="date" value={f.measured_at} onChange={e => setF({ ...f, measured_at: e.target.value })} /></div>
-          </div>
-          <div><label className="label">Notiz</label><input className="input" onChange={e => setF({ ...f, note: e.target.value })} /></div>
-          <button className="btn-primary w-full" onClick={async () => { if (f.value != null) { await addMeasurement({ ...f, user_id: uid }); setOpen(false); load() } }}>Speichern</button>
-        </div>
-      </Modal>
-    </div>
-  )
-}
-
 function MoodPicker({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
   return (
     <div className="flex justify-between gap-1">
@@ -200,65 +160,41 @@ function MoodPicker({ value, onChange }: { value: number | null; onChange: (v: n
 }
 
 function DiaryTab({ uid }: { uid: string }) {
-  const [entries, setEntries] = useState<DiaryEntry[]>([])
   const [sessions, setSessions] = useState<WorkoutSession[]>([])
-  const [text, setText] = useState('')
-  const [newMood, setNewMood] = useState<number | null>(null)
   const [editS, setEditS] = useState<WorkoutSession | null>(null)
+  const [loading, setLoading] = useState(true)
 
   async function load() {
-    const [d, ss] = await Promise.all([getDiary(uid), getSessions(uid, 300)])
-    setEntries(d)
+    const ss = await getSessions(uid, 300)
     setSessions(ss.filter(s => (s.notes && s.notes.trim()) || s.mood))
+    setLoading(false)
   }
   useEffect(() => { load() }, [uid])
 
-  const items = useMemo(() => {
-    const t = sessions.map(s => ({
-      kind: 't' as const, id: s.id, date: (s.completed_at ?? s.started_at).slice(0, 10),
-      title: s.day_title, mood: s.mood, content: s.notes, session: s
-    }))
-    const f = entries.map(e => ({
-      kind: 'f' as const, id: e.id, date: e.entry_date, mood: e.mood, content: e.content, title: null, session: null
-    }))
-    return [...t, ...f].sort((a, b) => b.date.localeCompare(a.date))
-  }, [sessions, entries])
+  if (loading) return <Spinner />
 
   return (
     <div className="space-y-3">
-      <div className="card">
-        <p className="text-xs text-white/50 mb-2">🔒 Privat. Freier Eintrag – Trainings-Einträge erscheinen automatisch hier.</p>
-        <textarea className="input min-h-[70px]" value={text} onChange={e => setText(e.target.value)} placeholder="Gedanken, Fortschritte, Ernährung…" />
-        <div className="my-2"><MoodPicker value={newMood} onChange={setNewMood} /></div>
-        <button className="btn-primary w-full" disabled={!text.trim() && !newMood}
-          onClick={async () => { await addDiary({ user_id: uid, content: text.trim(), entry_date: todayISO(), mood: newMood ?? undefined }); setText(''); setNewMood(null); load() }}>
-          Eintrag speichern
-        </button>
-      </div>
-
-      {items.map(it => (
-        it.kind === 't' ? (
-          <button key={'t' + it.id} onClick={() => setEditS(it.session!)} className="card w-full text-left active:scale-[0.99]">
+      <p className="text-xs text-white/50 px-1">🔒 Privat. Jeder Eintrag gehört zu einem Training (Bewertung + Notiz). Notizen erfasst du beim Workout-Abschluss oder im Verlauf.</p>
+      {!sessions.length && (
+        <div className="card text-center text-white/50 py-8">
+          <div className="text-4xl mb-2">📔</div>
+          <p className="text-sm">Noch keine Trainings-Einträge. Bewerte dein nächstes Workout am Ende.</p>
+        </div>
+      )}
+      {sessions.map(s => (
+        <button key={s.id} onClick={() => setEditS(s)} className="card w-full text-left active:scale-[0.99] flex gap-3 items-start">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-primary">🏋️ {it.title}</span>
-              <span className="text-xs text-white/45">{fmtDate(it.date)}</span>
+              <span className="text-xs font-semibold text-primary truncate">🏋️ {s.day_title}</span>
+              <span className="text-xs text-white/45 shrink-0">{fmtDate(s.completed_at ?? s.started_at)}</span>
             </div>
-            {(it.content || it.mood) && (
-              <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed mt-1">{moodEmoji(it.mood)} {it.content}</p>
-            )}
-            <p className="text-[10px] text-white/30 mt-1">Trainings-Eintrag · tippen zum Bearbeiten</p>
-          </button>
-        ) : (
-          <div key={'f' + it.id} className="card">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-white/45">📝 {fmtDate(it.date)}</span>
-              <button className="text-white/30 text-sm" onClick={async () => { await deleteDiary(it.id); load() }}>🗑️</button>
-            </div>
-            <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed">{moodEmoji(it.mood)} {it.content}</p>
+            {s.notes && <p className="text-sm text-white/80 whitespace-pre-wrap leading-relaxed mt-1">{s.notes}</p>}
+            <p className="text-[10px] text-white/30 mt-1">tippen zum Bearbeiten</p>
           </div>
-        )
+          {s.mood && <span className="text-2xl leading-none shrink-0">{moodEmoji(s.mood)}</span>}
+        </button>
       ))}
-
       {editS && <TrainingEntryEditor session={editS} onClose={() => setEditS(null)} onSaved={() => { setEditS(null); load() }} />}
     </div>
   )
