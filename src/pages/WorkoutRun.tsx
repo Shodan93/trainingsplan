@@ -5,9 +5,9 @@ import { supabase } from '../lib/supabase'
 import {
   getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
   ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
-  setExerciseTargetWeight, addDiary
+  setExerciseTargetWeight, addDiary, getSessionLogs
 } from '../lib/db'
-import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge } from '../lib/types'
+import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge, SetLog } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
 import { cls, fmtWeight, isoWeekStart, vibrate, todayISO } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
@@ -26,6 +26,8 @@ export default function WorkoutRun() {
   const [exs, setExs] = useState<PlanExercise[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
   const [rows, setRows] = useState<Record<string, Row[]>>({})
+  const rowsRef = useRef<Record<string, Row[]>>({})
+  const persistTimers = useRef<Record<string, number>>({})
   const [sugs, setSugs] = useState<Record<string, Sug>>({})
   const [idx, setIdx] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -63,6 +65,11 @@ export default function WorkoutRun() {
     setRestTotal(st?.default_rest_seconds ?? 90)
     setExs(list)
 
+    // Bereits in DIESER Session gespeicherte Sätze (z. B. nach Browser-Reload)
+    const existing = await getSessionLogs(sess.id)
+    const byKey: Record<string, SetLog> = {}
+    existing.forEach(l => { if (l.plan_exercise_id) byKey[`${l.plan_exercise_id}|${l.set_number}`] = l })
+
     const r: Record<string, Row[]> = {}
     const sg: Record<string, Sug> = {}
     await Promise.all(list.map(async (ex) => {
@@ -72,13 +79,20 @@ export default function WorkoutRun() {
       ])
       if (sug) sg[ex.id] = sug
       r[ex.id] = Array.from({ length: ex.sets }, (_, i) => {
+        const saved = byKey[`${ex.id}|${i + 1}`]
+        if (saved) {
+          return {
+            weight: saved.weight ?? null, reps: saved.reps ?? null,
+            completed: saved.completed, failure: saved.is_failure
+          }
+        }
         const prev = last[i]
         let w = prev?.weight ?? ex.target_weight ?? null
         if (sess.is_deload && w != null) w = Math.round((w * 0.5) / 0.25) * 0.25
         return { weight: w, reps: null, completed: false, failure: false }
       })
     }))
-    setRows(r); setSugs(sg); setLoading(false)
+    setRows(r); rowsRef.current = r; setSugs(sg); setLoading(false)
   }, [sessionId, profile])
 
   useEffect(() => { load() }, [load])
@@ -108,7 +122,29 @@ export default function WorkoutRun() {
     setRows(prev => {
       const copy = { ...prev }
       copy[exId] = copy[exId].map((row, j) => j === i ? { ...row, ...patch } : row)
+      rowsRef.current = copy
       return copy
+    })
+    debouncedPersist(exId, i)
+  }
+
+  // Eingetippte Werte automatisch sichern (auch ohne Abhaken) → übersteht Reload
+  function debouncedPersist(exId: string, i: number) {
+    const key = `${exId}|${i}`
+    if (persistTimers.current[key]) clearTimeout(persistTimers.current[key])
+    persistTimers.current[key] = window.setTimeout(() => persistSet(exId, i), 500)
+  }
+  async function persistSet(exId: string, i: number) {
+    const ex2 = exs.find(e => e.id === exId)
+    const row = rowsRef.current[exId]?.[i]
+    if (!ex2 || !row) return
+    if (row.weight == null && row.reps == null && !row.completed) return // nichts zu speichern
+    await saveSetLog({
+      session_id: sessionId!, plan_exercise_id: exId, exercise_name: ex2.name,
+      muscle_group: ex2.muscle_group, set_number: i + 1,
+      target_rep_min: ex2.rep_min, target_rep_max: ex2.rep_max,
+      weight: row.weight, reps: row.reps, is_failure: row.failure,
+      completed: row.completed, rest_seconds: restTotal
     })
   }
 
@@ -116,7 +152,7 @@ export default function WorkoutRun() {
     const ex2 = exs.find(e => e.id === exId)!
     const next = !rows[exId][i].completed
     const updated = rows[exId].map((r, j) => j === i ? { ...r, completed: next } : r)
-    setRows(prev => ({ ...prev, [exId]: updated }))
+    setRows(prev => { const c = { ...prev, [exId]: updated }; rowsRef.current = c; return c })
     const row = updated[i]
     if (next) {
       if (settings?.sound_enabled) beep(740, 0.1)
