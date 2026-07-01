@@ -1,30 +1,30 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line,
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts'
 import { useAuth } from '../lib/auth'
 import { getSessions, setLogsForSessions } from '../lib/db'
-import { WorkoutSession, SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
+import { SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { PageSkeleton, EmptyState, Stat } from '../components/ui'
 import { fmtDate, fmtDuration, isoWeekStart, MOODS } from '../lib/utils'
 
 export default function Stats() {
   const { profile } = useAuth()
-  const [sessions, setSessions] = useState<WorkoutSession[]>([])
-  const [logs, setLogs] = useState<SetLog[]>([])
-  const [loading, setLoading] = useState(true)
   const [exPick, setExPick] = useState<string>('')
 
-  async function load() {
-    if (!profile) return
-    setLoading(true)
-    const ss = await getSessions(profile.id, 200)
-    setSessions(ss)
-    setLogs(await setLogsForSessions(ss.map(s => s.id)))
-    setLoading(false)
-  }
-  useEffect(() => { load() }, [profile])
+  const { data, isLoading } = useQuery({
+    queryKey: ['stats', profile?.id],
+    enabled: !!profile,
+    queryFn: async () => {
+      const ss = await getSessions(profile!.id, 200)
+      const lg = await setLogsForSessions(ss.map(s => s.id))
+      return { sessions: ss, logs: lg }
+    }
+  })
+  const sessions = data?.sessions ?? []
+  const logs: SetLog[] = data?.logs ?? []
 
   const setCountBySession = useMemo(() => {
     const m: Record<string, number> = {}
@@ -94,7 +94,7 @@ export default function Stats() {
       .map(p => ({ date: fmtDate(p.date).slice(0, 5), weight: p.weight, volume: Math.round(p.volume) }))
   }, [exPick, logs, sessions])
 
-  if (loading) return <PageSkeleton rows={5} />
+  if (isLoading) return <PageSkeleton rows={5} />
 
   const totalVolume = sessions.reduce((a, s) => a + (Number(s.total_volume) || 0), 0)
   const avgDur = sessions.length ? sessions.reduce((a, s) => a + (s.duration_seconds || 0), 0) / sessions.length : 0

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getSessions, setLogsForSessions, deleteSession,
@@ -10,25 +11,25 @@ import { fmtDate, fmtDuration, parseNum, MOODS, moodEmoji, cls } from '../lib/ut
 
 export default function History() {
   const { profile } = useAuth()
-  const [sessions, setSessions] = useState<WorkoutSession[]>([])
-  const [counts, setCounts] = useState<Record<string, number>>({})
-  const [loading, setLoading] = useState(true)
+  const qc = useQueryClient()
   const [editSession, setEditSession] = useState<WorkoutSession | null>(null)
 
-  async function load() {
-    if (!profile) return
-    setLoading(true)
-    const ss = await getSessions(profile.id, 300)
-    setSessions(ss)
-    const logs = await setLogsForSessions(ss.map(s => s.id))
-    const c: Record<string, number> = {}
-    logs.forEach(l => { c[l.session_id] = (c[l.session_id] ?? 0) + 1 })
-    setCounts(c)
-    setLoading(false)
-  }
-  useEffect(() => { load() }, [profile])
+  const { data, isLoading } = useQuery({
+    queryKey: ['history', profile?.id],
+    enabled: !!profile,
+    queryFn: async () => {
+      const ss = await getSessions(profile!.id, 300)
+      const logs = await setLogsForSessions(ss.map(s => s.id))
+      const c: Record<string, number> = {}
+      logs.forEach(l => { c[l.session_id] = (c[l.session_id] ?? 0) + 1 })
+      return { sessions: ss, counts: c }
+    }
+  })
+  const sessions = data?.sessions ?? []
+  const counts = data?.counts ?? {}
+  const refresh = () => qc.invalidateQueries({ queryKey: ['history'] })
 
-  if (loading) return <PageSkeleton rows={5} />
+  if (isLoading) return <PageSkeleton rows={5} />
 
   return (
     <div className="space-y-4 py-2">
@@ -56,7 +57,7 @@ export default function History() {
       )}
       {editSession && (
         <SessionEditor session={editSession} onClose={() => setEditSession(null)}
-          onChanged={() => { setEditSession(null); load() }} />
+          onChanged={() => { setEditSession(null); refresh(); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }) }} />
       )}
     </div>
   )

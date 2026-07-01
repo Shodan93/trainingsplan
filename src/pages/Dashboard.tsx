@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getStats, getActivePlan, getDays, tipOfTheDay, getWeeklyTarget, ensureWeeklyTarget,
@@ -18,34 +19,34 @@ const CAT_LABEL: Record<string, string> = {
 export default function Dashboard() {
   const { profile } = useAuth()
   const nav = useNavigate()
-  const [stats, setStats] = useState<UserStats | null>(null)
-  const [plan, setPlan] = useState<Plan | null>(null)
-  const [days, setDays] = useState<PlanDay[]>([])
-  const [tip, setTip] = useState<MotivationTip | null>(null)
-  const [week, setWeek] = useState<WeeklyTarget | null>(null)
-  const [weekDone, setWeekDone] = useState(0)
-  const [partners, setPartners] = useState<Profile[]>([])
-  const [openSession, setOpenSession] = useState<WorkoutSession | null>(null)
-  const [showResume, setShowResume] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const qc = useQueryClient()
+  const [dismissedResume, setDismissedResume] = useState(false)
 
-  useEffect(() => {
-    if (!profile) return
-    ;(async () => {
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard', profile?.id],
+    enabled: !!profile,
+    queryFn: async () => {
+      const uid = profile!.id
       const ws = isoWeekStart()
-      const [st, pl, tip, allProfiles, openS] = await Promise.all([
-        getStats(profile.id), getActivePlan(profile.id), tipOfTheDay(), getProfiles(), getOpenSession(profile.id)
+      const [stats, plan, tip, allProfiles, openSession] = await Promise.all([
+        getStats(uid), getActivePlan(uid), tipOfTheDay(), getProfiles(), getOpenSession(uid)
       ])
-      setStats(st); setPlan(pl); setPartners(allProfiles.filter(p => p.id !== profile.id))
-      setOpenSession(openS); if (openS) setShowResume(true)
-      if (pl) setDays(await getDays(pl.id))
-      setTip(tip)
-      await ensureWeeklyTarget(profile.id, ws)
-      setWeek(await getWeeklyTarget(profile.id, ws))
-      setWeekDone(await countCompletedSessionsInWeek(profile.id, ws))
-      setLoading(false)
-    })()
-  }, [profile])
+      const days = plan ? await getDays(plan.id) : []
+      await ensureWeeklyTarget(uid, ws)
+      const [week, weekDone] = await Promise.all([getWeeklyTarget(uid, ws), countCompletedSessionsInWeek(uid, ws)])
+      return { stats, plan, days, tip, partners: allProfiles.filter(p => p.id !== uid), openSession, week, weekDone }
+    }
+  })
+
+  const stats = data?.stats ?? null
+  const plan = data?.plan ?? null
+  const days = data?.days ?? []
+  const tip = data?.tip ?? null
+  const week = data?.week ?? null
+  const weekDone = data?.weekDone ?? 0
+  const partners = data?.partners ?? []
+  const openSession = data?.openSession ?? null
+  const showResume = !!openSession && !dismissedResume
 
   const todayWd = WD[new Date().getDay()]
   const suggestedDay = useMemo(
@@ -53,7 +54,7 @@ export default function Dashboard() {
     [days, todayWd]
   )
 
-  if (loading) return <PageSkeleton rows={5} />
+  if (isLoading) return <PageSkeleton rows={5} />
   const lp = stats ? levelProgress(stats.xp, stats.level) : { pct: 0, next: 0 }
 
   return (
@@ -77,7 +78,7 @@ export default function Dashboard() {
 
       {/* Wiedereinstiegs-Dialog */}
       {openSession && (
-        <Modal open={showResume} onClose={() => setShowResume(false)} title="🏋️ Laufendes Training gefunden">
+        <Modal open={showResume} onClose={() => setDismissedResume(true)} title="🏋️ Laufendes Training gefunden">
           <div className="space-y-4">
             <p className="text-white/75">
               Du hast ein nicht beendetes Training: <b>{openSession.day_title}</b>
@@ -86,7 +87,7 @@ export default function Dashboard() {
             </p>
             <div className="flex gap-2">
               <button className="btn-ghost flex-1" onClick={async () => {
-                if (confirm('Training wirklich verwerfen?')) { await deleteSession(openSession.id); setOpenSession(null); setShowResume(false) }
+                if (confirm('Training wirklich verwerfen?')) { await deleteSession(openSession.id); setDismissedResume(true); qc.invalidateQueries({ queryKey: ['dashboard'] }) }
               }}>Verwerfen</button>
               <button className="btn-primary flex-1" onClick={() => nav(`/workout/run/${openSession.id}`)}>Fortsetzen</button>
             </div>

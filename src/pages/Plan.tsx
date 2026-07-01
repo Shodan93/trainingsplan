@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getProfiles, getActivePlan, getDays, getDayExercises,
@@ -18,6 +19,8 @@ const GROUPS = Object.keys(MUSCLE_LABELS)
 
 export default function PlanPage() {
   const { profile } = useAuth()
+  const qc = useQueryClient()
+  const invalidatePlanCaches = () => { qc.invalidateQueries({ queryKey: ['workout-picker'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }) }
   const [people, setPeople] = useState<Profile[]>([])
   const [viewId, setViewId] = useState<string>('')
   const [plan, setPlan] = useState<Plan | null>(null)
@@ -81,6 +84,7 @@ export default function PlanPage() {
     setOrderDirty(false)
     setConfirmSave(false)
     setEdit(false)
+    invalidatePlanCaches()
   }
   function finishEditing() {
     if (orderDirty) setConfirmSave(true)
@@ -181,7 +185,7 @@ export default function PlanPage() {
                       <div className="flex gap-2 pt-1">
                         <button className="btn-ghost flex-1 text-xs" onClick={() => setEditDay(day)}>Tag bearbeiten</button>
                         <button className="btn-danger flex-1 text-xs" onClick={async () => {
-                          if (confirm('Diesen Tag löschen?')) { await deleteDay(day.id); load(viewId) }
+                          if (confirm('Diesen Tag löschen?')) { await deleteDay(day.id); load(viewId); invalidatePlanCaches() }
                         }}>Tag löschen</button>
                       </div>
                     )}
@@ -202,7 +206,7 @@ export default function PlanPage() {
       {/* Exercise editor */}
       {editEx && plan && (
         <ExerciseEditor ex={editEx} onClose={() => setEditEx(null)}
-          onSaved={() => { setEditEx(null); load(viewId) }} />
+          onSaved={() => { setEditEx(null); load(viewId); invalidatePlanCaches() }} />
       )}
       {/* Plan meta editor */}
       {editPlanMeta && plan && (
@@ -212,7 +216,7 @@ export default function PlanPage() {
       {/* Day editor */}
       {editDay && (
         <DayEditor day={editDay} onClose={() => setEditDay(null)}
-          onSaved={() => { setEditDay(null); load(viewId) }} />
+          onSaved={() => { setEditDay(null); load(viewId); invalidatePlanCaches() }} />
       )}
       {/* Speichern-Bestätigung beim Beenden des Bearbeitens */}
       {confirmSave && (

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   saveSetLog, finalizeSession, deleteSession,
@@ -22,6 +23,10 @@ export default function WorkoutRun() {
   const { sessionId } = useParams()
   const { profile } = useAuth()
   const nav = useNavigate()
+  const qc = useQueryClient()
+  function invalidateAll() {
+    ;['dashboard', 'stats', 'history', 'workout-picker'].forEach(k => qc.invalidateQueries({ queryKey: [k] }))
+  }
 
   const [session, setSession] = useState<WorkoutSession | null>(null)
   const [exs, setExs] = useState<PlanExercise[]>([])
@@ -339,6 +344,7 @@ export default function WorkoutRun() {
     if (!profile || !sessionId) return
     // persist any rows that have data but weren't toggled complete? Only completed count for stats.
     const res = await finalizeSession(sessionId)
+    invalidateAll()
     if (settings?.sound_enabled) successSound()
     vibrate([100, 60, 100, 60, 200])
 
@@ -369,6 +375,7 @@ export default function WorkoutRun() {
   async function cancel() {
     if (confirm('Training abbrechen und verwerfen?')) {
       await deleteSession(sessionId!)
+      invalidateAll()
       nav('/workout')
     }
   }

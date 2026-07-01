@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import { getActivePlan, getDays, getDayExercises, startSession, getOpenSession, deleteSession } from '../lib/db'
-import { Plan, PlanDay, PlanExercise, WorkoutSession } from '../lib/types'
+import { PlanDay, PlanExercise } from '../lib/types'
 import { PageSkeleton, EmptyState } from '../components/ui'
 import { cls } from '../lib/utils'
 
@@ -11,35 +12,33 @@ const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
 export default function WorkoutPicker() {
   const { profile } = useAuth()
   const nav = useNavigate()
-  const [plan, setPlan] = useState<Plan | null>(null)
-  const [days, setDays] = useState<PlanDay[]>([])
-  const [counts, setCounts] = useState<Record<string, number>>({})
-  const [mains, setMains] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState(true)
   const [deload, setDeload] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [open, setOpen] = useState<WorkoutSession | null>(null)
 
-  useEffect(() => {
-    if (!profile) return
-    ;(async () => {
-      const [pl, openS] = await Promise.all([getActivePlan(profile.id), getOpenSession(profile.id)])
-      setPlan(pl); setOpen(openS)
-      if (pl) {
-        const d = await getDays(pl.id)
-        setDays(d)
-        const ex = await getDayExercises(d.map(x => x.id))
-        const c: Record<string, number> = {}
-        const m: Record<string, string> = {}
+  const { data, isLoading } = useQuery({
+    queryKey: ['workout-picker', profile?.id],
+    enabled: !!profile,
+    queryFn: async () => {
+      const [plan, open] = await Promise.all([getActivePlan(profile!.id), getOpenSession(profile!.id)])
+      let days: PlanDay[] = []
+      const counts: Record<string, number> = {}
+      const mains: Record<string, string> = {}
+      if (plan) {
+        days = await getDays(plan.id)
+        const ex = await getDayExercises(days.map(x => x.id))
         ex.forEach((e: PlanExercise) => {
-          c[e.plan_day_id] = (c[e.plan_day_id] ?? 0) + 1
-          if (!m[e.plan_day_id]) m[e.plan_day_id] = e.name
+          counts[e.plan_day_id] = (counts[e.plan_day_id] ?? 0) + 1
+          if (!mains[e.plan_day_id]) mains[e.plan_day_id] = e.name
         })
-        setCounts(c); setMains(m)
       }
-      setLoading(false)
-    })()
-  }, [profile])
+      return { plan, days, counts, mains, open }
+    }
+  })
+  const plan = data?.plan ?? null
+  const days = data?.days ?? []
+  const counts = data?.counts ?? {}
+  const mains = data?.mains ?? {}
+  const open = data?.open ?? null
 
   async function start(day: PlanDay) {
     if (!profile || !plan) return
@@ -61,7 +60,7 @@ export default function WorkoutPicker() {
     }
   }
 
-  if (loading) return <PageSkeleton rows={4} />
+  if (isLoading) return <PageSkeleton rows={4} />
   const todayWd = WD[new Date().getDay()]
 
   return (
