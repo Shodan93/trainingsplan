@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import {
-  getStats, getActivePlan, getDays, getTips, getWeeklyTarget, ensureWeeklyTarget,
+  getStats, getActivePlan, getDays, tipOfTheDay, getWeeklyTarget, ensureWeeklyTarget,
   getProfiles, getOpenSession, deleteSession, countCompletedSessionsInWeek
 } from '../lib/db'
 import { UserStats, Plan, PlanDay, MotivationTip, WeeklyTarget, Profile, WorkoutSession } from '../lib/types'
@@ -33,16 +33,13 @@ export default function Dashboard() {
     if (!profile) return
     ;(async () => {
       const ws = isoWeekStart()
-      const [st, pl, tips, allProfiles, openS] = await Promise.all([
-        getStats(profile.id), getActivePlan(profile.id), getTips(), getProfiles(), getOpenSession(profile.id)
+      const [st, pl, tip, allProfiles, openS] = await Promise.all([
+        getStats(profile.id), getActivePlan(profile.id), tipOfTheDay(), getProfiles(), getOpenSession(profile.id)
       ])
       setStats(st); setPlan(pl); setPartners(allProfiles.filter(p => p.id !== profile.id))
       setOpenSession(openS); if (openS) setShowResume(true)
       if (pl) setDays(await getDays(pl.id))
-      if (tips.length) {
-        const idx = Math.floor(Date.now() / 86400000) % tips.length
-        setTip(tips[idx])
-      }
+      setTip(tip)
       await ensureWeeklyTarget(profile.id, ws)
       setWeek(await getWeeklyTarget(profile.id, ws))
       setWeekDone(await countCompletedSessionsInWeek(profile.id, ws))

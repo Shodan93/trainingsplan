@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { supabase } from '../lib/supabase'
 import {
-  getExercises, getSettings, saveSetLog, finalizeSession, deleteSession,
-  ddpSuggestion, lastSetsForExercise, getStats, getWeeklyTarget, getTips, getBadges,
-  setExerciseTargetWeight, getSessionLogs, updateSession,
+  saveSetLog, finalizeSession, deleteSession,
+  getStats, getWeeklyTarget, tipOfTheDay, getBadges,
+  setExerciseTargetWeight, updateSession, workoutBootstrap,
   updateExercise, renameSessionExercise, deleteAllSetLogsForExercise
 } from '../lib/db'
-import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge, SetLog } from '../lib/types'
+import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
 import { cls, fmtWeight, isoWeekStart, vibrate, parseNum, MOODS } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
@@ -72,34 +71,28 @@ export default function WorkoutRun() {
 
   const load = useCallback(async () => {
     if (!sessionId || !profile) return
-    const { data: s } = await supabase.from('workout_sessions').select('*').eq('id', sessionId).single()
-    const sess = s as WorkoutSession
+    // Alles in EINEM Aufruf (statt ~30 Einzel-Requests)
+    const boot = await workoutBootstrap(sessionId)
+    const sess = boot.session
     setSession(sess)
-    const [st, list] = await Promise.all([
-      getSettings(profile.id),
-      sess.plan_day_id ? getExercises(sess.plan_day_id) : Promise.resolve([] as PlanExercise[])
-    ])
-    setSettings(st)
-    setRestTotal(st?.default_rest_seconds ?? 90)
+    setSettings(boot.settings)
+    setRestTotal(boot.settings?.default_rest_seconds ?? 90)
+    const list = boot.exercises as unknown as PlanExercise[]
     setExs(list)
 
     // Bereits in DIESER Session gespeicherte Sätze (z. B. nach Browser-Reload)
-    const existing = await getSessionLogs(sess.id)
-    const byKey: Record<string, SetLog> = {}
-    existing.forEach(l => { if (l.plan_exercise_id) byKey[`${l.plan_exercise_id}|${l.set_number}`] = l })
+    const byKey: Record<string, { weight: number | null; reps: number | null; completed: boolean; is_failure: boolean }> = {}
+    boot.current_logs.forEach(l => { if (l.plan_exercise_id) byKey[`${l.plan_exercise_id}|${l.set_number}`] = l })
 
     const r: Record<string, Row[]> = {}
     const sg: Record<string, Sug> = {}
     const lc: Record<string, number> = {}
-    await Promise.all(list.map(async (ex) => {
-      const [last, sug] = await Promise.all([
-        lastSetsForExercise(ex.id),
-        ddpSuggestion(ex.id).catch(() => null)
-      ])
-      if (sug) sg[ex.id] = sug
-      lc[ex.id] = last.length
+    boot.exercises.forEach(ex => {
+      if (ex.suggestion) sg[ex.id] = ex.suggestion
+      lc[ex.id] = ex.last_count ?? 0
+      const lastArr = ex.last_sets ?? []
       r[ex.id] = Array.from({ length: ex.sets }, (_, i) => {
-        const prev = last[i]
+        const prev = lastArr[i]
         const lastWeight = prev?.weight ?? null
         const lastReps = prev?.reps ?? null
         const saved = byKey[`${ex.id}|${i + 1}`]
@@ -113,7 +106,7 @@ export default function WorkoutRun() {
         if (sess.is_deload && w != null) w = Math.round((w * 0.5) / 0.25) * 0.25
         return { weight: w, reps: null, completed: false, failure: false, lastWeight, lastReps }
       })
-    }))
+    })
     setRows(r); rowsRef.current = r; setSugs(sg); setLastCounts(lc); setLoading(false)
   }, [sessionId, profile])
 
@@ -351,8 +344,8 @@ export default function WorkoutRun() {
 
     // DDP progression happened if the user confirmed at least one weight increase
     const didIncrease = progressed.current.size > 0
-    const [stats, week, tips, allBadges] = await Promise.all([
-      getStats(profile.id), getWeeklyTarget(profile.id, isoWeekStart()), getTips(), getBadges()
+    const [stats, week, tip1, allBadges] = await Promise.all([
+      getStats(profile.id), getWeeklyTarget(profile.id, isoWeekStart()), tipOfTheDay(), getBadges()
     ])
     const newCodes = stats ? await evaluateBadges(profile.id, stats, {
       totalVolume: res.total_volume, isDeload: session?.is_deload ?? false,
@@ -360,7 +353,7 @@ export default function WorkoutRun() {
       didIncrease, weeklyAchieved: week?.achieved ?? false
     }) : []
     const badgeObjs = allBadges.filter(b => newCodes.includes(b.code))
-    const tip = tips.length ? tips[Math.floor(Math.random() * tips.length)].text : ''
+    const tip = tip1?.text ?? ''
     setSummary({ xp: res.xp_earned, volume: res.total_volume, streak: res.streak, level: res.level, badges: badgeObjs, tip })
   }
 

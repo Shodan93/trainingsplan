@@ -5,6 +5,22 @@ import {
   MotivationTip, Profile, Settings
 } from './types'
 
+export type WorkoutBootstrap = {
+  session: WorkoutSession
+  settings: Settings | null
+  current_logs: { plan_exercise_id: string | null; set_number: number; weight: number | null; reps: number | null; completed: boolean; is_failure: boolean }[]
+  exercises: (PlanExercise & { last_sets: { set_number: number; weight: number | null; reps: number | null }[]; last_count: number; suggestion: { action: string; message: string; weight: number | null } })[]
+}
+export async function workoutBootstrap(sessionId: string): Promise<WorkoutBootstrap> {
+  const { data, error } = await supabase.rpc('workout_bootstrap', { p_session_id: sessionId })
+  if (error) throw error
+  return data as WorkoutBootstrap
+}
+export async function tipOfTheDay(): Promise<MotivationTip | null> {
+  const { data } = await supabase.rpc('tip_of_the_day')
+  return (data ?? null) as MotivationTip | null
+}
+
 export async function getProfiles(): Promise<Profile[]> {
   const { data } = await supabase.from('profiles').select('*').order('display_name')
   return (data ?? []) as Profile[]
