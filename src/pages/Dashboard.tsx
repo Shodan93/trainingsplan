@@ -7,7 +7,7 @@ import {
 } from '../lib/db'
 import { UserStats, Plan, PlanDay, MotivationTip, WeeklyTarget, Profile, WorkoutSession } from '../lib/types'
 import { greeting, levelProgress, isoWeekStart, cls, fmtDateTime } from '../lib/utils'
-import { Spinner, ProgressBar, Stat, Chip, Modal } from '../components/ui'
+import { PageSkeleton, ProgressBar, Stat, Chip, Modal } from '../components/ui'
 
 const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
 const CAT_LABEL: Record<string, string> = {
@@ -53,7 +53,7 @@ export default function Dashboard() {
     [days, todayWd]
   )
 
-  if (loading) return <Spinner label="Lade Dashboard…" />
+  if (loading) return <PageSkeleton rows={5} />
   const lp = stats ? levelProgress(stats.xp, stats.level) : { pct: 0, next: 0 }
 
   return (

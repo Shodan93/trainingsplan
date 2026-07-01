@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { getActivePlan, getDays, getDayExercises, startSession, getOpenSession, deleteSession } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, WorkoutSession } from '../lib/types'
-import { Spinner, EmptyState } from '../components/ui'
+import { PageSkeleton, EmptyState } from '../components/ui'
 import { cls } from '../lib/utils'
 
 const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
@@ -61,7 +61,7 @@ export default function WorkoutPicker() {
     }
   }
 
-  if (loading) return <Spinner label="Lade Training…" />
+  if (loading) return <PageSkeleton rows={4} />
   const todayWd = WD[new Date().getDay()]
 
   return (

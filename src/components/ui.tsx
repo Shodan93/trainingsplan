@@ -10,6 +10,20 @@ export function Spinner({ label }: { label?: string }) {
   )
 }
 
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cls('animate-pulse rounded-xl bg-white/5', className)} />
+}
+
+// Schlichter, inhaltsförmiger Ladezustand (statt Vollbild-Spinner)
+export function PageSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="space-y-4 py-2" aria-busy="true">
+      <Skeleton className="h-7 w-40 mt-2" />
+      {Array.from({ length: rows }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
+    </div>
+  )
+}
+
 export function Chip({ children, color, className }: { children: ReactNode; color?: string; className?: string }) {
   return (
     <span

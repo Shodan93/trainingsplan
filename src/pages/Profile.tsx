@@ -10,7 +10,7 @@ import {
 import {
   Settings, UserStats, Badge, UserBadge, Goal, WorkoutSession
 } from '../lib/types'
-import { Spinner, Modal, ProgressBar } from '../components/ui'
+import { Spinner, PageSkeleton, Modal, ProgressBar } from '../components/ui'
 import { fmtDate, levelProgress, isoWeekStart, cls, todayISO, MOODS, moodEmoji } from '../lib/utils'
 import { ensureNotifyPermission } from '../lib/notify'
 
@@ -41,7 +41,7 @@ export default function Profile() {
   }
   useEffect(() => { load() }, [profile])
 
-  if (loading || !profile) return <Spinner label="Lade Profil…" />
+  if (loading || !profile) return <PageSkeleton rows={4} />
   const earnedSet = new Set(earned.map(e => e.badge_code))
   const lp = stats ? levelProgress(stats.xp, stats.level) : { pct: 0, next: 0 }
 

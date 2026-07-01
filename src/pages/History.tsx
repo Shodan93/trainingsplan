@@ -5,7 +5,7 @@ import {
   getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume, recomputeStats
 } from '../lib/db'
 import { WorkoutSession, SetLog } from '../lib/types'
-import { Spinner, EmptyState, Modal } from '../components/ui'
+import { Spinner, PageSkeleton, EmptyState, Modal } from '../components/ui'
 import { fmtDate, fmtDuration, parseNum, MOODS, moodEmoji, cls } from '../lib/utils'
 
 export default function History() {
@@ -28,7 +28,7 @@ export default function History() {
   }
   useEffect(() => { load() }, [profile])
 
-  if (loading) return <Spinner label="Lade Verlauf…" />
+  if (loading) return <PageSkeleton rows={5} />
 
   return (
     <div className="space-y-4 py-2">

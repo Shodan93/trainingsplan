@@ -5,7 +5,7 @@ import {
   updatePlan, updateExercise, addExercise, deleteExercise, addDay, updateDay, deleteDay, reorderExercises
 } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
-import { Spinner, Modal, Chip, EmptyState } from '../components/ui'
+import { PageSkeleton, Modal, Chip, EmptyState } from '../components/ui'
 import { fmtWeight, cls, parseNum } from '../lib/utils'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent
@@ -87,7 +87,7 @@ export default function PlanPage() {
     else setEdit(false)
   }
 
-  if (loading && !plan) return <Spinner label="Lade Plan…" />
+  if (loading && !plan) return <PageSkeleton rows={4} />
 
   return (
     <div className="space-y-4 py-2">

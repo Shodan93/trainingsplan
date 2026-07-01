@@ -6,7 +6,7 @@ import {
 import { useAuth } from '../lib/auth'
 import { getSessions, setLogsForSessions } from '../lib/db'
 import { WorkoutSession, SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
-import { Spinner, EmptyState, Stat } from '../components/ui'
+import { PageSkeleton, EmptyState, Stat } from '../components/ui'
 import { fmtDate, fmtDuration, isoWeekStart, MOODS } from '../lib/utils'
 
 export default function Stats() {
@@ -94,7 +94,7 @@ export default function Stats() {
       .map(p => ({ date: fmtDate(p.date).slice(0, 5), weight: p.weight, volume: Math.round(p.volume) }))
   }, [exPick, logs, sessions])
 
-  if (loading) return <Spinner label="Lade Statistik…" />
+  if (loading) return <PageSkeleton rows={5} />
 
   const totalVolume = sessions.reduce((a, s) => a + (Number(s.total_volume) || 0), 0)
   const avgDur = sessions.length ? sessions.reduce((a, s) => a + (s.duration_seconds || 0), 0) / sessions.length : 0
