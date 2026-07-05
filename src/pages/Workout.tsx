@@ -65,7 +65,7 @@ export default function WorkoutPicker() {
 
   return (
     <div className="space-y-4 py-2">
-      <h1 className="text-2xl font-extrabold pt-2">🔥 Training starten</h1>
+      <h1 className="text-2xl font-bold pt-2">Training starten</h1>
 
       {!plan ? (
         <EmptyState icon="📋" title="Kein aktiver Plan" hint={'Lege zuerst im Tab „Plan“ einen Plan an.'} />
@@ -75,17 +75,17 @@ export default function WorkoutPicker() {
             <button onClick={() => nav(`/workout/run/${open.id}`)}
               className="card w-full text-left border-accent/40 bg-accent/10 flex items-center justify-between active:scale-[0.99]">
               <div>
-                <p className="font-bold text-accent">▶ Laufendes Training fortsetzen</p>
+                <p className="font-semibold text-accent">Laufendes Training fortsetzen</p>
                 <p className="text-xs text-white/55 mt-0.5">{open.day_title}</p>
               </div>
-              <span className="text-2xl">↩︎</span>
+              <span className="text-xl text-white/40">›</span>
             </button>
           )}
 
           <label className="card flex items-center justify-between cursor-pointer">
             <div>
-              <p className="font-semibold">🧘 Deload-Woche</p>
-              <p className="text-xs text-white/50">Alle Gewichte ~50 %, gleiches Programm (Woche {plan.deload_week})</p>
+              <p className="font-semibold">Deload-Woche</p>
+              <p className="text-xs text-white/50">Alle Gewichte ~50 % – bei Stagnation oder alle 6–10 Wochen</p>
             </div>
             <input type="checkbox" className="w-5 h-5" checked={deload} onChange={e => setDeload(e.target.checked)} />
           </label>
@@ -103,9 +103,9 @@ export default function WorkoutPicker() {
                     {today && <span className="chip bg-primary/20 text-primary">heute</span>}
                   </p>
                   <p className="text-xs text-white/45 mt-0.5">{day.effort} · {counts[day.id] ?? 0} Übungen</p>
-                  {mains[day.id] && <p className="text-xs text-primary/80 mt-0.5">🏋️ {mains[day.id]}</p>}
+                  {mains[day.id] && <p className="text-xs text-primary/80 mt-0.5">{mains[day.id]}</p>}
                 </div>
-                <span className="text-2xl">▶</span>
+                <span className="text-xl text-white/40">›</span>
               </button>
             )
           })}

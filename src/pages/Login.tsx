@@ -20,9 +20,8 @@ export default function Login() {
     <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-gradient-to-b from-bg to-[#0e1530]">
       <div className="w-full max-w-sm animate-slideup">
         <div className="text-center mb-8">
-          <div className="text-6xl mb-3">🏋️</div>
           <h1 className="text-3xl font-extrabold tracking-tight">Trainingsplan</h1>
-          <p className="text-white/50 mt-1">David &amp; Svenja · stark werden, gemeinsam</p>
+          <p className="text-white/50 mt-1">David &amp; Svenja</p>
         </div>
 
         <form onSubmit={submit} className="card space-y-4">

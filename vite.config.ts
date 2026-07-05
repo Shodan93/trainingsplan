@@ -39,5 +39,15 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-data': ['@supabase/supabase-js', '@tanstack/react-query']
+        }
+      }
+    }
+  },
   server: { port: 5173, host: true }
 })

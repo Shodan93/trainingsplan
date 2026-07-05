@@ -153,9 +153,20 @@ export async function recomputeSessionVolume(sessionId: string): Promise<number>
   await supabase.from('workout_sessions').update({ total_volume: vol }).eq('id', sessionId)
   return vol
 }
-// DDP: persist a new working weight on a plan exercise.
+// DDP: neues Arbeitsgewicht – wirkt via RPC auf ALLE Tage mit derselben Übung (Carry-over)
 export async function setExerciseTargetWeight(planExerciseId: string, weight: number) {
-  await supabase.from('plan_exercises').update({ target_weight: weight }).eq('id', planExerciseId)
+  const { error } = await supabase.rpc('set_exercise_weight', { p_plan_exercise_id: planExerciseId, p_weight: weight })
+  if (error) throw error
+}
+// Deload-Autoregulation: letztes Deload-Datum bzw. Programmstart
+export async function getDeloadInfo(uid: string): Promise<{ lastDeload: string | null; firstSession: string | null }> {
+  const [{ data: d }, { data: f }] = await Promise.all([
+    supabase.from('workout_sessions').select('completed_at').eq('user_id', uid).eq('is_deload', true)
+      .not('completed_at', 'is', null).order('completed_at', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('workout_sessions').select('completed_at').eq('user_id', uid)
+      .not('completed_at', 'is', null).order('completed_at', { ascending: true }).limit(1).maybeSingle()
+  ])
+  return { lastDeload: d?.completed_at ?? null, firstSession: f?.completed_at ?? null }
 }
 // Set während des Trainings entfernen (nach Satznummer)
 export async function deleteSetLogByNumber(sessionId: string, planExerciseId: string, setNumber: number) {

@@ -7,14 +7,14 @@ import {
 } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { PageSkeleton, Modal, Chip, EmptyState } from '../components/ui'
-import { fmtWeight, cls, parseNum } from '../lib/utils'
+import { fmtWeight, cls, parseNum, EFFORT, effortInfo } from '../lib/utils'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
-const COLORS = ['🟠', '🟢', '🔵', '🟣', '🩷', '🟡', '🔴', '⚪']
+
 const GROUPS = Object.keys(MUSCLE_LABELS)
 
 export default function PlanPage() {
@@ -96,7 +96,7 @@ export default function PlanPage() {
   return (
     <div className="space-y-4 py-2">
       <div className="flex items-center justify-between pt-2">
-        <h1 className="text-2xl font-extrabold">📋 Plan</h1>
+        <h1 className="text-2xl font-bold">Plan</h1>
         {isOwn && plan && (
           <button className={cls('btn', edit ? 'btn-accent' : 'btn-ghost')} onClick={() => edit ? finishEditing() : setEdit(true)}>
             {edit ? '✓ Fertig' : '✏️ Bearbeiten'}
@@ -136,7 +136,7 @@ export default function PlanPage() {
             )}
             {plan.medical_note && (
               <div className="mt-3 text-xs bg-danger/10 border border-danger/20 rounded-xl p-2.5 text-red-200/90 leading-relaxed">
-                ⚕️ {plan.medical_note}
+                {plan.medical_note}
               </div>
             )}
           </div>
@@ -152,7 +152,7 @@ export default function PlanPage() {
                   <div className="text-left min-w-0">
                     <p className="font-bold truncate">{day.weekday} · {day.title}</p>
                     <p className="text-xs text-white/45">{day.effort} · {list.length} Übungen</p>
-                    {mainEx && <p className="text-xs text-primary/80 mt-0.5 truncate">🏋️ {mainEx}</p>}
+                    {mainEx && <p className="text-xs text-primary/80 mt-0.5 truncate">{mainEx}</p>}
                   </div>
                   <span className={cls('transition-transform text-white/40 shrink-0', isOpen && 'rotate-180')}>▾</span>
                 </button>
@@ -178,7 +178,7 @@ export default function PlanPage() {
                       <button className="btn-ghost w-full text-sm" onClick={() => setEditEx({
                         id: '', plan_day_id: day.id, exercise_id: null, name: '', muscle_group: 'other',
                         color: '⚪', sets: 3, rep_min: 8, rep_max: 12, per_side: false, is_home: false,
-                        is_warning: false, target_weight: null, unit: 'kg', cue: '', technique: '', sort_order: list.length + 1
+                        is_warning: false, target_weight: null, unit: 'kg', cue: '', technique: '', effort_code: 'rir12', sort_order: list.length + 1
                       })}>+ Übung hinzufügen</button>
                     )}
                     {edit && isOwn && (
@@ -257,18 +257,18 @@ function SortableExercise({ ex, onEdit }: { ex: PlanExercise; onEdit: () => void
 function ExerciseRow({ ex, edit, onEdit, handle }:
   { ex: PlanExercise; edit: boolean; onEdit: () => void; handle?: React.ReactNode }) {
   return (
-    <div className="bg-surface2 rounded-xl p-3 flex items-start gap-2" style={{ borderLeft: `3px solid ${MUSCLE_HEX[ex.muscle_group] ?? '#64748b'}` }}>
+    <div className="bg-surface2 rounded-xl p-3 flex items-start gap-2.5" style={{ borderLeft: `3px solid ${MUSCLE_HEX[ex.muscle_group] ?? '#64748b'}` }}>
       {handle}
-      <span className="text-lg leading-none mt-0.5">{ex.color}</span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="font-semibold">{ex.name}</p>
-          {ex.is_warning && <span title="Haltungshinweis">⚠️</span>}
+          {ex.is_warning && <Chip color="#ef4444">Hinweis</Chip>}
           {ex.is_home && <Chip color="#3b82f6">Zuhause</Chip>}
         </div>
         <p className="text-sm text-white/60 mt-0.5">
-          {ex.sets} × {ex.rep_min}-{ex.rep_max}{ex.per_side ? '/Seite' : ''}
-          {ex.target_weight != null && <> · <span className="text-accent font-semibold">{fmtWeight(ex.target_weight, ex.unit)}</span></>}
+          {ex.sets} × {ex.rep_min}–{ex.rep_max}{ex.per_side ? '/Seite' : ''}
+          {ex.target_weight != null && <> · <span className="text-white/85 font-semibold">{fmtWeight(ex.target_weight, ex.unit)}</span></>}
+          <span className="text-white/35"> · {effortInfo(ex.effort_code).label}</span>
         </p>
         {ex.cue && <p className="text-xs text-white/40 mt-1 leading-snug">{ex.cue}</p>}
       </div>
@@ -290,7 +290,7 @@ function ExerciseEditor({ ex, onClose, onSaved }: { ex: PlanExercise; onClose: (
       plan_day_id: f.plan_day_id, name: f.name.trim(), muscle_group: f.muscle_group, color: f.color,
       sets: f.sets, rep_min: f.rep_min, rep_max: f.rep_max, per_side: f.per_side, is_home: f.is_home,
       is_warning: f.is_warning, target_weight: f.target_weight, unit: f.unit, cue: f.cue,
-      technique: f.technique, sort_order: f.sort_order
+      technique: f.technique, effort_code: f.effort_code || 'rir12', sort_order: f.sort_order
     }
     if (isNew) await addExercise(payload)
     else await updateExercise(f.id, payload)
@@ -312,13 +312,10 @@ function ExerciseEditor({ ex, onClose, onSaved }: { ex: PlanExercise; onClose: (
             </select>
           </div>
           <div>
-            <label className="label">Farbe</label>
-            <div className="flex flex-wrap gap-1">
-              {COLORS.map(c => (
-                <button key={c} onClick={() => set({ color: c })}
-                  className={cls('w-9 h-9 rounded-lg text-lg', f.color === c ? 'bg-primary/30 ring-2 ring-primary' : 'bg-surface2')}>{c}</button>
-              ))}
-            </div>
+            <label className="label">Anstrengung</label>
+            <select className="input" value={f.effort_code || 'rir12'} onChange={e => set({ effort_code: e.target.value })}>
+              {Object.entries(EFFORT).map(([code, v]) => <option key={code} value={code}>{v.label}</option>)}
+            </select>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-3">

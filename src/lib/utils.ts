@@ -60,6 +60,27 @@ export function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Anstrengungs-Anweisung pro Übung (evidenzbasiert, statt RIR-Logging)
+export const EFFORT: Record<string, { label: string; explain: string }> = {
+  tech: {
+    label: 'Technik-Fokus',
+    explain: 'Qualität vor Last: langsame, saubere Wiederholungen. Haltungs- und Aufwärmarbeit – nicht bis zur Erschöpfung trainieren.'
+  },
+  rir12: {
+    label: '1–2 RIR',
+    explain: 'Beende jeden Satz, wenn noch 1–2 saubere Wiederholungen möglich wären. Die Forschung (Refalo 2024) zeigt: gleiches Muskelwachstum wie bis zum Versagen – bei deutlich weniger Ermüdung.'
+  },
+  rir23: {
+    label: '2–3 RIR · kein Versagen',
+    explain: 'Schwere Grundübung: 2–3 Wiederholungen Reserve lassen und nie bis zum Versagen gehen. Kraftzuwachs ist von der Nähe zum Versagen unabhängig – Gelenke, Sehnen und Sicherheit gehen vor.'
+  },
+  fail_last: {
+    label: 'Letzter Satz bis Muskelversagen',
+    explain: 'Sichere Maschine/Isolation: die ersten Sätze mit 1–2 Wiederholungen Reserve, den letzten Satz bis zum technischen Muskelversagen ausreizen – hier ist das Risiko gering und der Reiz maximal.'
+  }
+}
+export const effortInfo = (code: string | null | undefined) => EFFORT[code ?? 'rir12'] ?? EFFORT.rir12
+
 // Stimmungs-Bewertung (Tagebuch & Training – ein gemeinsames Modell)
 export const MOODS = [
   { v: 1, e: '😣', l: 'mies' },

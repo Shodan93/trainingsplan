@@ -48,21 +48,20 @@ export default function Profile() {
   return (
     <div className="space-y-4 py-2">
       <div className="flex items-center justify-between pt-2">
-        <h1 className="text-2xl font-extrabold">👤 Profil</h1>
+        <h1 className="text-2xl font-bold">Profil</h1>
         <button className="btn-ghost text-sm" onClick={signOut}>Abmelden</button>
       </div>
 
       {/* identity */}
       <div className="card flex items-center gap-4">
-        <button className="text-5xl" onClick={async () => {
+        <button className="text-4xl" onClick={async () => {
           const i = (AVATARS.indexOf(profile.avatar_emoji) + 1) % AVATARS.length
           await supabase.from('profiles').update({ avatar_emoji: AVATARS[i] }).eq('id', profile.id)
           refreshProfile()
         }}>{profile.avatar_emoji}</button>
         <div className="flex-1">
-          <p className="text-xl font-extrabold">{profile.display_name}</p>
-          <p className="text-xs text-white/50">Level {stats?.level} · {stats?.xp} XP · 🔥 {stats?.current_streak} Streak</p>
-          <ProgressBar pct={lp.pct} color="#f59e0b" className="mt-2" />
+          <p className="text-lg font-bold">{profile.display_name}</p>
+          <p className="text-xs text-white/50">Streak {stats?.current_streak} · {stats?.total_workouts} Workouts</p>
         </div>
       </div>
 
@@ -75,21 +74,26 @@ export default function Profile() {
       </div>
 
       {tab === 'Übersicht' && (
-        <div className="card">
-          <p className="font-bold mb-3">Abzeichen 🏅 ({earnedSet.size}/{badges.length})</p>
-          <div className="grid grid-cols-3 gap-3">
-            {badges.map(b => {
-              const has = earnedSet.has(b.code)
-              return (
-                <div key={b.code} className={cls('rounded-xl p-3 text-center border', has ? 'bg-accent/10 border-accent/30' : 'bg-surface2 border-white/5 opacity-40')}>
-                  <div className="text-3xl mb-1">{has ? b.icon : '🔒'}</div>
-                  <p className="text-xs font-semibold leading-tight">{b.name}</p>
-                  <p className="text-[10px] text-white/40 mt-0.5 leading-tight">{b.description}</p>
-                </div>
-              )
-            })}
+        <details className="card">
+          <summary className="cursor-pointer select-none flex items-center justify-between">
+            <span className="font-semibold text-sm">Erfolge & Level</span>
+            <span className="text-xs text-white/45">Level {stats?.level} · {earnedSet.size}/{badges.length} Abzeichen</span>
+          </summary>
+          <div className="mt-3">
+            <ProgressBar pct={lp.pct} color="#0ea5e9" className="mb-3" />
+            <div className="grid grid-cols-3 gap-2">
+              {badges.map(b => {
+                const has = earnedSet.has(b.code)
+                return (
+                  <div key={b.code} className={cls('rounded-xl p-2.5 text-center border', has ? 'bg-primary/10 border-primary/25' : 'bg-surface2 border-white/5 opacity-40')}>
+                    <div className="text-2xl mb-1">{has ? b.icon : '·'}</div>
+                    <p className="text-xs font-medium leading-tight">{b.name}</p>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        </div>
+        </details>
       )}
 
       {tab === 'Ziele' && <GoalsTab uid={profile.id} />}

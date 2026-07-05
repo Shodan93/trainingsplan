@@ -33,7 +33,7 @@ export default function History() {
 
   return (
     <div className="space-y-4 py-2">
-      <h1 className="text-2xl font-extrabold pt-2">📖 Trainingsverlauf</h1>
+      <h1 className="text-2xl font-bold pt-2">Trainingsverlauf</h1>
       {!sessions.length ? (
         <EmptyState icon="📭" title="Noch keine Trainings" hint="Deine abgeschlossenen Trainings erscheinen hier – mit Übungen und Notiz." />
       ) : (

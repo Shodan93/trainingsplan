@@ -102,14 +102,14 @@ export default function Stats() {
 
   if (!sessions.length) return (
     <div className="py-2">
-      <h1 className="text-2xl font-extrabold pt-2 mb-4">📈 Statistik</h1>
+      <h1 className="text-2xl font-bold pt-2 mb-4">Statistik</h1>
       <EmptyState icon="📊" title="Noch keine Trainingsdaten" hint="Absolviere dein erstes Workout, dann erscheinen hier Auswertungen." />
     </div>
   )
 
   return (
     <div className="space-y-5 py-2">
-      <h1 className="text-2xl font-extrabold pt-2">📈 Statistik</h1>
+      <h1 className="text-2xl font-bold pt-2">Statistik</h1>
 
       {/* Stimmungs-Übersicht: wie viele Trainings welche Bewertung */}
       <div className="card">

@@ -10,7 +10,7 @@ import {
 } from '../lib/db'
 import { PlanExercise, WorkoutSession, Settings, MUSCLE_HEX, Badge } from '../lib/types'
 import { Spinner, Modal, ProgressBar } from '../components/ui'
-import { cls, fmtWeight, isoWeekStart, vibrate, parseNum, MOODS } from '../lib/utils'
+import { cls, fmtWeight, isoWeekStart, vibrate, parseNum, MOODS, effortInfo } from '../lib/utils'
 import { timerDoneSound, successSound, beep } from '../lib/sound'
 import { evaluateBadges } from '../lib/gamification'
 import { confetti } from '../lib/confetti'
@@ -59,6 +59,7 @@ export default function WorkoutRun() {
   // Gesamt-Dauer der Session
   const [elapsed, setElapsed] = useState(0)
   const [showTech, setShowTech] = useState(false)
+  const [showWhy, setShowWhy] = useState(false)
 
   // Übung live anpassen
   const [editEx, setEditEx] = useState(false)
@@ -157,7 +158,7 @@ export default function WorkoutRun() {
     }
   }, [])
 
-  useEffect(() => { setShowTech(false) }, [idx])
+  useEffect(() => { setShowTech(false); setShowWhy(false) }, [idx])
 
   // Gesamt-Timer ab Session-Start
   useEffect(() => {
@@ -417,23 +418,36 @@ export default function WorkoutRun() {
       {/* Exercise body */}
       <main className="flex-1 px-4 py-4 pb-40 overflow-y-auto">
         <p className="text-xs text-white/40">Übung {idx + 1} / {exs.length}</p>
-        <h1 className="text-2xl font-extrabold flex items-center gap-2 mt-1" style={{ color }}>
-          <span>{ex.color}</span> <span className="text-white flex-1">{ex.name}</span>
+        <h1 className="text-2xl font-bold flex items-center gap-2.5 mt-1">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+          <span className="text-white flex-1">{ex.name}</span>
           <button className="btn-ghost !px-2 !py-1 text-sm shrink-0" onClick={() => { setNameDraft(ex.name); setEditEx(true) }}>✏️</button>
         </h1>
         <p className="text-white/55 mt-1">
-          Ziel: {ex.sets} × {ex.rep_min}-{ex.rep_max}{ex.per_side ? '/Seite' : ''}
+          {ex.sets} × {ex.rep_min}–{ex.rep_max}{ex.per_side ? '/Seite' : ''}
           {ex.target_weight != null && <> · {fmtWeight(ex.target_weight, ex.unit)}</>}
         </p>
+
+        {/* Anstrengungs-Anweisung (evidenzbasiert) */}
+        <div className="mt-3 rounded-xl border border-primary/25 bg-primary/10 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-sky-200">{effortInfo(ex.effort_code).label}</p>
+            <button className="text-xs text-white/45 underline underline-offset-2" onClick={() => setShowWhy(s => !s)}>
+              {showWhy ? 'schließen' : 'Warum?'}
+            </button>
+          </div>
+          {showWhy && <p className="text-xs text-white/65 leading-relaxed mt-1.5">{effortInfo(ex.effort_code).explain}</p>}
+        </div>
+
         {ex.is_warning && ex.cue && (
-          <div className="mt-3 text-sm bg-danger/10 border border-danger/20 rounded-xl p-3 text-red-200/90">⚠️ {ex.cue}</div>
+          <div className="mt-3 text-sm bg-danger/10 border border-danger/20 rounded-xl p-3 text-red-200/90">{ex.cue}</div>
         )}
-        {!ex.is_warning && ex.cue && <p className="text-sm text-white/45 mt-2 leading-snug">💬 {ex.cue}</p>}
+        {!ex.is_warning && ex.cue && <p className="text-sm text-white/45 mt-2 leading-snug">{ex.cue}</p>}
 
         {ex.technique && (
           <div className="mt-3">
             <button className="btn-ghost w-full !justify-between text-sm" onClick={() => setShowTech(s => !s)}>
-              <span>ℹ️ Ausführung im Detail</span>
+              <span>Ausführung im Detail</span>
               <span className={cls('transition-transform', showTech && 'rotate-180')}>▾</span>
             </button>
             {showTech && (
@@ -489,12 +503,6 @@ export default function WorkoutRun() {
             <p className="text-danger text-sm px-1 animate-pop">⚠️ Bitte zuerst die Wiederholungen eintragen, dann abhaken.</p>
           )}
           <button className="btn-ghost w-full text-sm mt-1" onClick={addSet}>+ Satz hinzufügen</button>
-          <label className="flex items-center gap-2 text-xs text-white/50 px-1 pt-1">
-            <input type="checkbox"
-              checked={(rows[ex.id] ?? []).slice(-1)[0]?.failure ?? false}
-              onChange={(e) => updateRow(ex.id, (rows[ex.id]?.length ?? 1) - 1, { failure: e.target.checked })} />
-            Letzter Satz bis zum Muskelversagen
-          </label>
         </div>
 
         {/* Exercise nav */}
@@ -550,7 +558,7 @@ export default function WorkoutRun() {
 
       {/* Warnung beim Weiterklicken (Übung nicht komplett) */}
       {nextWarn && (
-        <Modal open onClose={() => setNextWarn(false)} title="⚠️ Übung noch nicht fertig">
+        <Modal open onClose={() => setNextWarn(false)} title="Übung noch nicht fertig">
           <div className="space-y-4">
             <p className="text-white/75"><b>{ex.name}</b> ist noch nicht komplett ausgefüllt und abgehakt. Trotzdem zur nächsten Übung?</p>
             <div className="flex gap-2">
@@ -563,7 +571,7 @@ export default function WorkoutRun() {
 
       {/* Unvollständig-Warnung */}
       {incomplete && (
-        <Modal open onClose={() => setIncomplete(null)} title="⚠️ Training noch nicht komplett">
+        <Modal open onClose={() => setIncomplete(null)} title="Training noch nicht komplett">
           <div className="space-y-4">
             <p className="text-white/75">Diese Übungen haben noch offene Sätze. Tippe drauf, um direkt hinzuspringen:</p>
             <div className="space-y-2">
@@ -585,11 +593,11 @@ export default function WorkoutRun() {
 
       {/* DDP-Vorschlag: erhöhen (up) oder reduzieren (down) */}
       {ddp && (
-        <Modal open onClose={() => setDdp(null)} title={ddp.direction === 'up' ? '🎉 Rep-Range geknackt!' : '⬇️ Unter der Rep-Range'}>
+        <Modal open onClose={() => setDdp(null)} title={ddp.direction === 'up' ? 'Rep-Range geknackt!' : 'Unter der Rep-Range'}>
           <div className="space-y-4 text-center">
             {ddp.direction === 'up' ? (
               <>
-                <p className="text-5xl animate-pop">📈🎊</p>
+                
                 <p className="text-white/80">
                   Du hast bei <span className="font-bold text-white">{ddp.name}</span> alle Sätze am
                   oberen Ende der Wiederholungs-Range geschafft – <b>Dynamic Double Progression!</b>
@@ -597,7 +605,7 @@ export default function WorkoutRun() {
               </>
             ) : (
               <>
-                <p className="text-5xl animate-pop">⬇️</p>
+                
                 <p className="text-white/80">
                   Bei <span className="font-bold text-white">{ddp.name}</span> warst du unter der Mindest-Range.
                   Reduziere das Gewicht, damit du wieder sauber im Zielbereich trainierst.
@@ -615,6 +623,7 @@ export default function WorkoutRun() {
               <span className="text-sm text-white/60">Gewicht anpassen</span>
               <button className="btn-ghost !px-3" onClick={() => setDdp(d => d && { ...d, suggested: d.suggested + (ddp.unit === 'kg' ? 2.5 : 5) })}>+</button>
             </div>
+            <p className="text-[11px] text-white/40">Gilt automatisch für alle Trainingstage mit dieser Übung.</p>
             <div className="flex gap-2">
               <button className="btn-ghost flex-1" onClick={() => setDdp(null)}>Später</button>
               <button className={cls('flex-1', ddp.direction === 'up' ? 'btn-accent' : 'btn-primary')} onClick={applyChange}>
@@ -627,7 +636,7 @@ export default function WorkoutRun() {
 
       {/* Summary */}
       {summary && (
-        <Modal open onClose={finishAndGoHome} title="🎉 Workout abgeschlossen!">
+        <Modal open onClose={finishAndGoHome} title="Workout abgeschlossen">
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <SumBox icon="⚡" v={`+${summary.xp}`} l="XP verdient" />
