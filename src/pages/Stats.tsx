@@ -5,7 +5,6 @@ import {
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts'
 import { useAuth } from '../lib/auth'
-import { GymTabs } from '../components/Layout'
 import { getSessions, setLogsForSessions } from '../lib/db'
 import { SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
 import { PageSkeleton, EmptyState, Stat } from '../components/ui'
@@ -105,7 +104,6 @@ export default function Stats() {
 
   if (!sessions.length) return (
     <div className="py-2">
-      <div className="md:hidden"><GymTabs /></div>
       <h1 className="text-2xl font-bold pt-2 mb-4">Statistik</h1>
       <EmptyState icon="📊" title="Noch keine Trainingsdaten" hint="Absolviere dein erstes Workout, dann erscheinen hier Auswertungen." />
     </div>
@@ -113,7 +111,6 @@ export default function Stats() {
 
   return (
     <div className="space-y-5 py-2">
-      <div className="md:hidden"><GymTabs /></div>
       <h1 className="text-2xl font-bold pt-2">Statistik</h1>
 
       {/* Stimmungs-Übersicht: wie viele Trainings welche Bewertung */}

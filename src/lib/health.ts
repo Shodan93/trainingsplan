@@ -107,45 +107,84 @@ export function recommendedGoalWeight(heightCm: number, sex: string): number {
 // ---------- Kalorien ----------
 export type GoalType = 'lose' | 'cut' | 'maintain' | 'lean_bulk'
 export const GOAL_LABEL: Record<GoalType, string> = {
-  lose: 'Abnehmen', cut: 'Cut (definieren)', maintain: 'Halten', lean_bulk: 'Lean Bulk'
+  cut: 'Cut (muskelschonend)', lose: 'Abnehmen (zügig)', maintain: 'Halten', lean_bulk: 'Lean Bulk'
 }
-const GOAL_ADJUST: Record<GoalType, number> = { lose: -400, cut: -500, maintain: 0, lean_bulk: 200 }
+// Defizit/Überschuss relativ zum Körpergewicht (1 kg Fett ≈ 7700 kcal):
+// Cut: −0,5 % KG/Woche = optimale Rate, um Muskeln zu halten (Helms 2014, Garthe 2011)
+// Abnehmen: −0,75 % KG/Woche = zügiger, dafür etwas höheres Muskelverlust-Risiko
+// Lean Bulk: +0,2 % KG/Woche = Aufbau ohne unnötiges Fett
+const GOAL_RATE_PCT_PER_WEEK: Record<GoalType, number> = { cut: -0.5, lose: -0.75, maintain: 0, lean_bulk: 0.2 }
+const GOAL_NOTE: Record<GoalType, string> = {
+  cut: '−0,5 % Körpergewicht/Woche – die optimale Abnehmrate, um Muskelmasse zu halten',
+  lose: '−0,75 % Körpergewicht/Woche – zügiger, aber etwas höheres Risiko für Muskelverlust',
+  maintain: 'Erhaltungskalorien – Gewicht bleibt stabil',
+  lean_bulk: '+0,2 % Körpergewicht/Woche – Muskelaufbau ohne unnötiges Fett'
+}
 
 export type CalorieBreakdown = {
   bmr: number
-  activityFactor: number
-  workoutsPerWeek: number
   tdee: number
   adjust: number
   target: number
+  workoutsPerWeek: number
+  kcalPerSession: number
   proteinG: [number, number]
   parts: { label: string; value: string; note: string }[]
 }
 
-// Mifflin-St Jeor + Aktivitätsfaktor aus echtem Trainingsvolumen + Ziel-Anpassung
+// Mifflin-St-Jeor-Grundumsatz + Alltagsaktivität + Training aus ECHTEN Daten
+// (Ø Dauer und Ø bewegtes Gesamtvolumen deiner Einheiten × geplante Frequenz)
+// + Ziel-Anpassung relativ zum Körpergewicht
 export function calorieTarget(opts: {
   weightKg: number; heightCm: number; birthYear: number; sex: string
-  goal: GoalType; workoutsPerWeek: number; trainingLink: boolean
+  goal: GoalType; trainingLink: boolean
+  workoutsPerWeek: number          // geplante Einheiten/Woche (Plan oder manuell)
+  avgSessionMin: number | null     // Ø Dauer aus dem Verlauf
+  avgTonnageKg: number | null      // Ø Volumen (kg bewegt) aus dem Verlauf
 }): CalorieBreakdown {
   const age = new Date().getFullYear() - opts.birthYear
   const bmr = Math.round(10 * opts.weightKg + 6.25 * opts.heightCm - 5 * age + (opts.sex === 'f' ? -161 : 5))
-  const w = opts.trainingLink ? Math.min(opts.workoutsPerWeek, 6) : 0
-  // 0 Trainings ≈ sitzend (1.2); je Einheit/Woche ~ +0.045 bis max ~1.47 (moderat aktiv)
-  const activityFactor = Math.round((1.2 + w * 0.045) * 1000) / 1000
-  const tdee = Math.round(bmr * activityFactor)
-  const adjust = GOAL_ADJUST[opts.goal]
-  const target = Math.max(1200, tdee + adjust)
-  const proteinG: [number, number] = [Math.round(opts.weightKg * 1.6), Math.round(opts.weightKg * 2.2)]
-  return {
-    bmr, activityFactor, workoutsPerWeek: opts.workoutsPerWeek, tdee, adjust, target, proteinG,
-    parts: [
-      { label: 'Grundumsatz (BMR)', value: `${bmr} kcal`, note: `Mifflin-St-Jeor: 10×${opts.weightKg} kg + 6,25×${opts.heightCm} cm − 5×${age} J ${opts.sex === 'f' ? '− 161' : '+ 5'}` },
-      { label: 'Aktivität', value: `× ${activityFactor}`, note: opts.trainingLink ? `${opts.workoutsPerWeek}× Training/Woche (aus deinem Verlauf) + Alltag` : 'Training-Verknüpfung aus – nur Alltagsaktivität (1,2)' },
-      { label: 'Gesamtumsatz (TDEE)', value: `${tdee} kcal`, note: 'BMR × Aktivitätsfaktor' },
-      { label: `Ziel: ${GOAL_LABEL[opts.goal]}`, value: `${adjust >= 0 ? '+' : ''}${adjust} kcal`, note: adjust < 0 ? 'Moderates Defizit – nachhaltig, muskelschonend (~0,3–0,5 kg/Woche)' : adjust > 0 ? 'Leichter Überschuss – Muskelaufbau ohne unnötiges Fett' : 'Erhaltungskalorien' },
-      { label: 'Protein-Empfehlung', value: `${proteinG[0]}–${proteinG[1]} g/Tag`, note: '1,6–2,2 g/kg Körpergewicht (Morton 2018)' }
-    ]
-  }
+
+  // Alltag (NEAT): Gehen, Stehen, Haushalt – leicht aktiver Alltag ≈ ×1,35
+  const neat = Math.round(bmr * 0.35)
+
+  // Training pro Einheit: Zeit-Komponente (MET ~3,5 für Krafttraining inkl.
+  // Satzpausen) + Volumen-Komponente (mechanische Arbeit des bewegten Gewichts)
+  // + 7 % Nachbrenneffekt (EPOC)
+  const wpw = opts.trainingLink ? Math.min(opts.workoutsPerWeek, 7) : 0
+  const dur = opts.avgSessionMin ?? 60
+  const ton = opts.avgTonnageKg ?? 0
+  const kcalPerSession = wpw > 0
+    ? Math.round((dur * 0.0613 * opts.weightKg + ton * 0.008) * 1.07)
+    : 0
+  const trainingDaily = Math.round(kcalPerSession * wpw / 7)
+
+  const tdee = bmr + neat + trainingDaily
+  const adjust = Math.round(opts.weightKg * GOAL_RATE_PCT_PER_WEEK[opts.goal] / 100 * 7700 / 7)
+  // Sicherheitsgrenze: nie unter den Grundumsatz
+  const target = Math.max(bmr, tdee + adjust)
+  const floored = tdee + adjust < bmr
+
+  // Im Defizit mehr Protein zum Muskelschutz (Helms 2014), sonst Morton 2018
+  const deficit = adjust < 0
+  const proteinG: [number, number] = deficit
+    ? [Math.round(opts.weightKg * 2.0), Math.round(opts.weightKg * 2.4)]
+    : [Math.round(opts.weightKg * 1.6), Math.round(opts.weightKg * 2.2)]
+
+  const parts: CalorieBreakdown['parts'] = [
+    { label: 'Grundumsatz (BMR)', value: `${bmr} kcal`, note: `Mifflin-St-Jeor: 10×${Math.round(opts.weightKg)} kg + 6,25×${opts.heightCm} cm − 5×${age} J ${opts.sex === 'f' ? '− 161' : '+ 5'}` },
+    { label: 'Alltag (NEAT)', value: `+${neat} kcal`, note: 'Gehen, Stehen, Haushalt – leicht aktiver Alltag (+35 %)' },
+    {
+      label: 'Krafttraining', value: `+${trainingDaily} kcal`,
+      note: wpw > 0
+        ? `${wpw}× pro Woche · Ø ${Math.round(dur)} min${ton > 0 ? ` · Ø ${ton.toLocaleString('de-DE')} kg Volumen` : ''} ≈ ${kcalPerSession} kcal/Einheit (inkl. Nachbrenneffekt), auf 7 Tage verteilt`
+        : 'Training-Verknüpfung ist aus'
+    },
+    { label: 'Gesamtumsatz (TDEE)', value: `${tdee} kcal`, note: 'Grundumsatz + Alltag + Training' },
+    { label: `Ziel: ${GOAL_LABEL[opts.goal]}`, value: `${adjust >= 0 ? '+' : ''}${adjust} kcal`, note: GOAL_NOTE[opts.goal] + (floored ? ' · auf Grundumsatz begrenzt (Sicherheitsgrenze)' : '') },
+    { label: 'Protein-Empfehlung', value: `${proteinG[0]}–${proteinG[1]} g/Tag`, note: deficit ? '2,0–2,4 g/kg – im Defizit schützt hohes Protein die Muskulatur' : '1,6–2,2 g/kg Körpergewicht (Morton 2018)' }
+  ]
+  return { bmr, tdee, adjust, target, workoutsPerWeek: wpw, kcalPerSession, proteinG, parts }
 }
 
 // ---------- Open Food Facts ----------

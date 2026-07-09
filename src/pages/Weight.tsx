@@ -11,6 +11,7 @@ import {
   bmi, bmiCategory, normalWeightRange, recommendedGoalWeight, BMI_CATEGORIES
 } from '../lib/health'
 import { PageSkeleton, Modal, ProgressBar } from '../components/ui'
+import { BottomBar, SegmentRow } from '../components/Layout'
 import { cls, fmtDate, parseNum } from '../lib/utils'
 
 const SEGMENTS = ['Übersicht', 'Statistik', 'BMI', 'Verlauf'] as const
@@ -50,13 +51,15 @@ export default function Weight() {
     <div className="space-y-4 py-2">
       <div className="flex items-center justify-between pt-2">
         <h1 className="text-2xl font-bold">Gewicht</h1>
-        <button className="btn-primary !px-4 !py-1.5" onClick={() => setAddOpen(true)}>+ Eintrag</button>
+        {/* Desktop-Aktion – mobil liegt der Button unten in der Daumen-Zone */}
+        <button className="btn-primary !px-4 !py-1.5 hidden md:block" onClick={() => setAddOpen(true)}>+ Eintrag</button>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1">
+      {/* Desktop-Segmente – mobil unten */}
+      <div className="hidden md:flex gap-1">
         {SEGMENTS.map(s => (
           <button key={s} onClick={() => setSeg(s)}
-            className={cls('btn shrink-0 !py-1.5 text-sm', seg === s ? 'btn-primary' : 'btn-ghost')}>{s}</button>
+            className={cls('btn flex-1 !py-1.5 text-sm', seg === s ? 'btn-primary' : 'btn-ghost')}>{s}</button>
         ))}
       </div>
 
@@ -70,6 +73,20 @@ export default function Weight() {
           {seg === 'Verlauf' && <Verlauf logs={logs} onEdit={setEditLog} />}
         </>
       )}
+
+      {/* Daumen-Zone: Haupt-Aktion + Segmente unten über der Navigation */}
+      <BottomBar>
+        <div className="flex justify-center">
+          <button className="btn-primary !px-8 !py-3 text-base shadow-lg shadow-primary/30"
+            onClick={() => setAddOpen(true)}>+ Eintrag</button>
+        </div>
+        <SegmentRow>
+          {SEGMENTS.map(s => (
+            <button key={s} onClick={() => setSeg(s)}
+              className={cls('btn flex-1 !py-2 !px-1 text-sm', seg === s ? 'btn-primary' : 'btn-ghost')}>{s}</button>
+          ))}
+        </SegmentRow>
+      </BottomBar>
 
       {addOpen && (
         <EntryModal title="Gewicht eintragen" initial={logs[0]?.weight ?? 80} onClose={() => setAddOpen(false)}

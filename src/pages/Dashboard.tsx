@@ -6,7 +6,6 @@ import {
   getStats, getActivePlan, getDays, tipOfTheDay, getWeeklyTarget, ensureWeeklyTarget,
   getProfiles, getOpenSession, deleteSession, countCompletedSessionsInWeek, getDeloadInfo, startSession
 } from '../lib/db'
-import { GymTabs } from '../components/Layout'
 import { UserStats, Profile } from '../lib/types'
 import { greeting, isoWeekStart, cls, fmtDateTime } from '../lib/utils'
 import { PageSkeleton, ProgressBar, Chip, Modal } from '../components/ui'
@@ -82,7 +81,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4 py-2">
-      <div className="md:hidden"><GymTabs /></div>
       <header className="pt-2">
         <p className="text-sm text-white/45">{greeting()},</p>
         <h1 className="text-2xl font-bold">{profile?.display_name}</h1>

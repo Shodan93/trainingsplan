@@ -20,6 +20,7 @@ export type Settings = {
   goal_weight: number | null
   calorie_training_link: boolean
   calorie_override: number | null
+  planned_workouts: number | null
 }
 
 export type WeightLog = {

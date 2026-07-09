@@ -322,12 +322,39 @@ export async function deleteCalorieLog(id: string) {
   await supabase.from('calorie_logs').delete().eq('id', id)
 }
 // Ø Workouts/Woche aus den letzten 28 Tagen (für Kalorien-Aktivitätsfaktor)
-export async function workoutsPerWeek(uid: string): Promise<number> {
+// Echte Trainingslast für die Kalorienrechnung: Ø Dauer & Ø Volumen aus den
+// letzten 28 Tagen plus geplante Frequenz aus dem aktiven Plan (Anzahl Plan-Tage)
+export type TrainingLoad = {
+  avgSessionMin: number | null
+  avgTonnageKg: number | null
+  observedPerWeek: number
+  plannedPerWeek: number | null
+}
+export async function trainingLoad(uid: string): Promise<TrainingLoad> {
   const since = new Date(Date.now() - 28 * 86400000).toISOString()
-  const { count } = await supabase.from('workout_sessions')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', uid).not('completed_at', 'is', null).gte('completed_at', since)
-  return Math.round(((count ?? 0) / 4) * 10) / 10
+  const [{ data: sessions }, plan] = await Promise.all([
+    supabase.from('workout_sessions')
+      .select('duration_seconds,total_volume')
+      .eq('user_id', uid).not('completed_at', 'is', null).gte('completed_at', since),
+    getActivePlan(uid)
+  ])
+  const ss = (sessions ?? []).filter(s => (s.duration_seconds ?? 0) > 0 || Number(s.total_volume) > 0)
+  const avg = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
+  // Plausibilität: offen liegen gelassene Sessions (z. B. 25 h) nicht mitzählen
+  const durs = ss.map(s => (s.duration_seconds ?? 0) / 60).filter(v => v >= 15 && v <= 240)
+  const tons = ss.map(s => Number(s.total_volume) || 0).filter(v => v > 0)
+  let plannedPerWeek: number | null = null
+  if (plan) {
+    const { count } = await supabase.from('plan_days')
+      .select('id', { count: 'exact', head: true }).eq('plan_id', plan.id)
+    plannedPerWeek = count ?? null
+  }
+  return {
+    avgSessionMin: avg(durs) ? Math.round(avg(durs)!) : null,
+    avgTonnageKg: avg(tons) ? Math.round(avg(tons)!) : null,
+    observedPerWeek: Math.round(((sessions?.length ?? 0) / 4) * 10) / 10,
+    plannedPerWeek
+  }
 }
 
 export async function getTips(): Promise<MotivationTip[]> {

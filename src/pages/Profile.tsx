@@ -11,7 +11,8 @@ import {
   Settings, UserStats, Badge, UserBadge, Goal, WorkoutSession
 } from '../lib/types'
 import { Spinner, PageSkeleton, Modal, ProgressBar } from '../components/ui'
-import { fmtDate, levelProgress, isoWeekStart, cls, todayISO, MOODS, moodEmoji } from '../lib/utils'
+import { BottomBar, SegmentRow } from '../components/Layout'
+import { fmtDate, levelProgress, isoWeekStart, cls, todayISO, MOODS, moodEmoji, parseNum } from '../lib/utils'
 import { ensureNotifyPermission } from '../lib/notify'
 
 const AVATARS = ['💪', '🏋️', '🔥', '🦾', '🏃', '🧗', '⚡', '🦁', '🐺', '🌟']
@@ -65,8 +66,8 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* tabs */}
-      <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1">
+      {/* Desktop-Tabs – mobil unten in der Daumen-Zone */}
+      <div className="hidden md:flex gap-1">
         {TABS.map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={cls('btn shrink-0 !py-1.5 text-sm', tab === t ? 'btn-primary' : 'btn-ghost')}>{t}</button>
@@ -104,6 +105,16 @@ export default function Profile() {
           onChange={(s) => setSettings(s)} displayName={profile.display_name}
           onName={async (name) => { await supabase.from('profiles').update({ display_name: name }).eq('id', profile.id); refreshProfile() }} />
       )}
+
+      {/* Daumen-Zone: Tabs unten über der Navigation */}
+      <BottomBar>
+        <SegmentRow>
+          {TABS.map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={cls('btn flex-1 !py-2 !px-0.5 text-[13px]', tab === t ? 'btn-primary' : 'btn-ghost')}>{t}</button>
+          ))}
+        </SegmentRow>
+      </BottomBar>
     </div>
   )
 }
@@ -249,6 +260,25 @@ function SettingsTab({ uid, settings, onChange, weekTarget, onWeek, displayName,
             value={weekTarget} onChange={e => onWeek(+e.target.value)} />
         </div>
       </div>
+      {/* Allgemeine persönliche Daten – Basis für Kalorienziel, BMI & Empfehlungen */}
+      <div className="card space-y-3">
+        <p className="font-semibold text-sm">Persönliche Daten</p>
+        <div className="grid grid-cols-2 gap-3">
+          <NumField label="Geburtsjahr" value={settings.birth_year} onSave={v => save({ birth_year: Math.round(v) })} />
+          <NumField label="Größe (cm)" value={settings.height_cm != null ? Number(settings.height_cm) : null} onSave={v => save({ height_cm: v })} />
+        </div>
+        <div>
+          <label className="label">Geschlecht</label>
+          <div className="flex gap-1.5">
+            {[['m', 'Männlich'], ['f', 'Weiblich']].map(([v, l]) => (
+              <button key={v} onClick={() => save({ sex: v })}
+                className={cls('btn flex-1 !py-2 text-sm', settings.sex === v ? 'btn-primary' : 'btn-ghost')}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <NumField label="Zielgewicht (kg)" value={settings.goal_weight != null ? Number(settings.goal_weight) : null} onSave={v => save({ goal_weight: v })} />
+        <p className="text-[11px] text-white/40">Wird für Kalorienziel, BMI und Prognosen in „Gewicht" & „Kalorien" verwendet.</p>
+      </div>
       <div className="card space-y-1">
         <Toggle label="🔊 Ton (Timer & Sätze)" on={settings.sound_enabled} set={v => save({ sound_enabled: v })} />
         <Toggle label="📳 Vibration" on={settings.vibration_enabled} set={v => save({ vibration_enabled: v })} />
@@ -266,6 +296,18 @@ function SettingsTab({ uid, settings, onChange, weekTarget, onWeek, displayName,
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+function NumField({ label, value, onSave }: { label: string; value: number | null; onSave: (v: number) => void }) {
+  const [draft, setDraft] = useState(value != null ? String(value) : '')
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <input className="input" type="text" inputMode="decimal" value={draft} placeholder="–"
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { const v = parseNum(draft); if (v != null) onSave(v) }} />
     </div>
   )
 }

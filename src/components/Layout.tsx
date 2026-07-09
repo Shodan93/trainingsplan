@@ -21,15 +21,22 @@ const GYM_SEGMENTS = [
   { to: '/stats', label: 'Statistik' }
 ]
 
-export function GymTabs() {
-  const loc = useLocation()
+// Daumen-Zone: fixe Leiste direkt über der Haupt-Navigation.
+// Seiten legen hier ihre Segmente und Haupt-Aktionen ab.
+export function BottomBar({ children }: { children: ReactNode }) {
   return (
-    <div className="flex gap-1 -mx-1 px-1 pt-2">
-      {GYM_SEGMENTS.map(s => (
-        <Link key={s.to} to={s.to}
-          className={cls('btn flex-1 !py-1.5 text-sm',
-            loc.pathname === s.to ? 'btn-primary' : 'btn-ghost')}>{s.label}</Link>
-      ))}
+    <div className="md:hidden fixed z-30 inset-x-0 px-3 pb-2"
+      style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom))' }}>
+      <div className="max-w-2xl mx-auto space-y-2">{children}</div>
+    </div>
+  )
+}
+
+// Segment-Zeile im BottomBar-Stil (durchscheinender Hintergrund)
+export function SegmentRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex gap-1 bg-surface/95 backdrop-blur rounded-2xl border border-white/10 p-1">
+      {children}
     </div>
   )
 }
@@ -41,6 +48,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const fullscreen = loc.pathname.startsWith('/workout/run')
 
   if (fullscreen) return <>{children}</>
+
+  const showGymSegments = GYM_PATHS.includes(loc.pathname) && loc.pathname !== '/workout'
 
   return (
     <div className="min-h-full flex md:justify-center">
@@ -72,9 +81,22 @@ export default function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 max-w-2xl w-full pb-24 md:pb-8">
+      <div className="flex-1 max-w-2xl w-full pb-44 md:pb-8">
         <main className="px-4 pt-safe md:pt-6">{children}</main>
       </div>
+
+      {/* Gym-Segmente: unten, direkt über der Haupt-Navigation */}
+      {showGymSegments && (
+        <BottomBar>
+          <SegmentRow>
+            {GYM_SEGMENTS.map(s => (
+              <Link key={s.to} to={s.to}
+                className={cls('btn flex-1 !py-2 text-sm',
+                  loc.pathname === s.to ? 'btn-primary' : 'btn-ghost')}>{s.label}</Link>
+            ))}
+          </SegmentRow>
+        </BottomBar>
+      )}
 
       {/* Mobile bottom nav – 4 Daumen-Tabs */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur border-t border-white/10 pb-safe">

@@ -3,11 +3,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getSettings, updateSettings, getCalorieLogs, addCalorieLog, deleteCalorieLog,
-  workoutsPerWeek, getWeightLogs
+  trainingLoad, getWeightLogs
 } from '../lib/db'
 import { CalorieLog, Settings } from '../lib/types'
 import { calorieTarget, GOAL_LABEL, GoalType, lookupBarcode, OffProduct, recommendedGoalWeight } from '../lib/health'
 import { PageSkeleton, Modal, ProgressBar, Spinner } from '../components/ui'
+import { BottomBar, SegmentRow } from '../components/Layout'
 import { cls, fmtDate, parseNum, todayISO } from '../lib/utils'
 
 const BarcodeScanner = lazy(() => import('../components/BarcodeScanner'))
@@ -20,69 +21,49 @@ export default function Calories() {
   const qc = useQueryClient()
   const [seg, setSeg] = useState<Segment>('Heute')
 
+  // Eintrags-Aktionen (Buttons liegen unten in der Daumen-Zone)
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [product, setProduct] = useState<{ code: string; p: OffProduct } | null>(null)
+  const [lookupBusy, setLookupBusy] = useState(false)
+  const [lookupErr, setLookupErr] = useState<string | null>(null)
+
   const { data, isLoading } = useQuery({
     queryKey: ['calories', profile?.id],
     enabled: !!profile,
     queryFn: async () => {
       const since = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10)
-      const [settings, logs, wpw, weights] = await Promise.all([
+      const [settings, logs, load, weights] = await Promise.all([
         getSettings(profile!.id), getCalorieLogs(profile!.id, since),
-        workoutsPerWeek(profile!.id), getWeightLogs(profile!.id, 1)
+        trainingLoad(profile!.id), getWeightLogs(profile!.id, 1)
       ])
-      return { settings, logs, wpw, currentWeight: weights[0] ? Number(weights[0].weight) : null }
+      return { settings, logs, load, currentWeight: weights[0] ? Number(weights[0].weight) : null }
     }
   })
   const refresh = () => qc.invalidateQueries({ queryKey: ['calories'] })
 
   const settings = data?.settings ?? null
   const logs = data?.logs ?? []
+  // Geplante Frequenz: manuelle Einstellung > Plan-Tage > beobachtete Trainings
+  const plannedWpw = settings?.planned_workouts
+    ?? data?.load.plannedPerWeek
+    ?? Math.round(data?.load.observedPerWeek ?? 0)
   const breakdown = useMemo(() => {
     if (!settings?.birth_year || !settings.height_cm || !data?.currentWeight) return null
     return calorieTarget({
       weightKg: data.currentWeight, heightCm: Number(settings.height_cm),
       birthYear: settings.birth_year, sex: settings.sex ?? 'm',
       goal: (settings.goal_type ?? 'maintain') as GoalType,
-      workoutsPerWeek: data.wpw ?? 0, trainingLink: settings.calorie_training_link
+      trainingLink: settings.calorie_training_link,
+      workoutsPerWeek: plannedWpw,
+      avgSessionMin: data.load.avgSessionMin,
+      avgTonnageKg: data.load.avgTonnageKg
     })
-  }, [settings, data])
+  }, [settings, data, plannedWpw])
   const target = settings?.calorie_override ?? breakdown?.target ?? null
 
-  if (isLoading) return <PageSkeleton rows={4} />
-
-  return (
-    <div className="space-y-4 py-2">
-      <h1 className="text-2xl font-bold pt-2">Kalorien</h1>
-      <div className="flex gap-1">
-        {SEGMENTS.map(s => (
-          <button key={s} onClick={() => setSeg(s)}
-            className={cls('btn flex-1 !py-1.5 text-sm', seg === s ? 'btn-primary' : 'btn-ghost')}>{s}</button>
-        ))}
-      </div>
-
-      {seg === 'Heute' && <Today uid={profile!.id} logs={logs} target={target} onChange={refresh} />}
-      {seg === 'Verlauf' && <History logs={logs} target={target} />}
-      {seg === 'Ziel' && settings && (
-        <GoalSettings uid={profile!.id} settings={settings} breakdown={breakdown}
-          currentWeight={data?.currentWeight ?? null} onChange={refresh} />
-      )}
-    </div>
-  )
-}
-
-// ---------- Heute ----------
-function Today({ uid, logs, target, onChange }:
-  { uid: string; logs: CalorieLog[]; target: number | null; onChange: () => void }) {
   const today = todayISO()
-  const todayLogs = logs.filter(l => l.day === today)
-  const eaten = todayLogs.reduce((a, l) => a + Number(l.kcal), 0)
-  const remaining = target != null ? target - eaten : null
-  const protein = todayLogs.reduce((a, l) => a + (Number(l.protein_g) || 0), 0)
-
-  const [quickOpen, setQuickOpen] = useState(false)
-  const [scanOpen, setScanOpen] = useState(false)
-  const [product, setProduct] = useState<{ code: string; p: OffProduct } | null>(null)
-  const [lookupBusy, setLookupBusy] = useState(false)
-  const [lookupErr, setLookupErr] = useState<string | null>(null)
+  const uid = profile?.id ?? ''
 
   async function onDetect(code: string) {
     setScanOpen(false); setLookupBusy(true); setLookupErr(null)
@@ -94,50 +75,59 @@ function Today({ uid, logs, target, onChange }:
     setLookupBusy(false)
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="flex items-baseline justify-between">
-          <p className="text-xs text-white/45">Übrig heute</p>
-          <p className="text-xs text-white/45">Ziel {target ?? '–'} kcal</p>
-        </div>
-        <p className={cls('text-4xl font-bold mt-1', remaining != null && remaining < 0 && 'text-danger')}>
-          {remaining != null ? Math.round(remaining) : '–'} <span className="text-lg font-medium text-white/45">kcal</span>
-        </p>
-        <ProgressBar className="mt-3" pct={target ? (eaten / target) * 100 : 0} color={remaining != null && remaining < 0 ? '#ef4444' : '#0ea5e9'} />
-        <p className="text-xs text-white/45 mt-2">{Math.round(eaten)} kcal gegessen{protein > 0 ? ` · ${Math.round(protein)} g Protein` : ''}</p>
-      </div>
+  if (isLoading) return <PageSkeleton rows={4} />
 
-      <div className="grid grid-cols-2 gap-3">
-        <button className="btn-primary py-3" onClick={() => setQuickOpen(true)}>+ Kalorien</button>
-        <button className="btn-ghost py-3 border border-white/10" onClick={() => setScanOpen(true)}>Barcode scannen</button>
+  return (
+    <div className="space-y-4 py-2">
+      <h1 className="text-2xl font-bold pt-2">Kalorien</h1>
+
+      {/* Desktop-Segmente – mobil unten in der Daumen-Zone */}
+      <div className="hidden md:flex gap-1">
+        {SEGMENTS.map(s => (
+          <button key={s} onClick={() => setSeg(s)}
+            className={cls('btn flex-1 !py-1.5 text-sm', seg === s ? 'btn-primary' : 'btn-ghost')}>{s}</button>
+        ))}
       </div>
+      {seg === 'Heute' && (
+        <div className="hidden md:grid grid-cols-2 gap-3">
+          <button className="btn-primary py-3" onClick={() => setQuickOpen(true)}>+ Kalorien</button>
+          <button className="btn-ghost py-3 border border-white/10" onClick={() => setScanOpen(true)}>Barcode scannen</button>
+        </div>
+      )}
+
       {lookupBusy && <div className="card"><Spinner label="Produkt wird gesucht…" /></div>}
       {lookupErr && <div className="card text-sm text-red-200 bg-danger/10 border-danger/25">{lookupErr}</div>}
 
-      <div className="card divide-y divide-white/5">
-        {!todayLogs.length && <p className="text-sm text-white/45 py-2">Heute noch nichts eingetragen.</p>}
-        {todayLogs.map(l => (
-          <div key={l.id} className="flex items-center justify-between py-2.5">
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{l.product_name ?? l.label ?? 'Eintrag'}</p>
-              <p className="text-[11px] text-white/40">
-                {new Date(l.logged_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-                {l.amount_g ? ` · ${l.amount_g} g` : ''}{l.source === 'barcode' ? ' · gescannt' : ''}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="font-semibold">{Math.round(Number(l.kcal))} kcal</span>
-              <button className="text-white/30" onClick={async () => { await deleteCalorieLog(l.id); onChange() }}>✕</button>
-            </div>
+      {seg === 'Heute' && <Today logs={logs} target={target} onChange={refresh} />}
+      {seg === 'Verlauf' && <History logs={logs} target={target} />}
+      {seg === 'Ziel' && settings && (
+        <GoalSettings uid={uid} settings={settings} breakdown={breakdown}
+          currentWeight={data?.currentWeight ?? null}
+          autoWpw={data?.load.plannedPerWeek ?? null} load={data!.load} onChange={refresh} />
+      )}
+
+      {/* Daumen-Zone: Aktionen + Segmente unten über der Navigation */}
+      <BottomBar>
+        {seg === 'Heute' && (
+          <div className="flex gap-2">
+            <button className="btn-primary flex-1 !py-3 text-base shadow-lg shadow-primary/30"
+              onClick={() => setQuickOpen(true)}>+ Kalorien</button>
+            <button className="btn-ghost flex-1 !py-3 text-base bg-surface/95 backdrop-blur border border-white/10"
+              onClick={() => setScanOpen(true)}>Barcode</button>
           </div>
-        ))}
-      </div>
+        )}
+        <SegmentRow>
+          {SEGMENTS.map(s => (
+            <button key={s} onClick={() => setSeg(s)}
+              className={cls('btn flex-1 !py-2 text-sm', seg === s ? 'btn-primary' : 'btn-ghost')}>{s}</button>
+          ))}
+        </SegmentRow>
+      </BottomBar>
 
       {quickOpen && (
         <QuickAdd onClose={() => setQuickOpen(false)} onSave={async (kcal, label) => {
           await addCalorieLog({ user_id: uid, kcal, label: label || null, source: 'manual', day: today })
-          setQuickOpen(false); onChange()
+          setQuickOpen(false); refresh()
         }} />
       )}
       {scanOpen && (
@@ -157,9 +147,54 @@ function Today({ uid, logs, target, onChange }:
             carbs_g: product.p.carbs100 != null ? Math.round(product.p.carbs100 * f * 10) / 10 : null,
             fat_g: product.p.fat100 != null ? Math.round(product.p.fat100 * f * 10) / 10 : null
           })
-          setProduct(null); onChange()
+          setProduct(null); refresh()
         }} />
       )}
+    </div>
+  )
+}
+
+// ---------- Heute ----------
+function Today({ logs, target, onChange }:
+  { logs: CalorieLog[]; target: number | null; onChange: () => void }) {
+  const today = todayISO()
+  const todayLogs = logs.filter(l => l.day === today)
+  const eaten = todayLogs.reduce((a, l) => a + Number(l.kcal), 0)
+  const remaining = target != null ? target - eaten : null
+  const protein = todayLogs.reduce((a, l) => a + (Number(l.protein_g) || 0), 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <div className="flex items-baseline justify-between">
+          <p className="text-xs text-white/45">Übrig heute</p>
+          <p className="text-xs text-white/45">Ziel {target ?? '–'} kcal</p>
+        </div>
+        <p className={cls('text-4xl font-bold mt-1', remaining != null && remaining < 0 && 'text-danger')}>
+          {remaining != null ? Math.round(remaining) : '–'} <span className="text-lg font-medium text-white/45">kcal</span>
+        </p>
+        <ProgressBar className="mt-3" pct={target ? (eaten / target) * 100 : 0} color={remaining != null && remaining < 0 ? '#ef4444' : '#0ea5e9'} />
+        <p className="text-xs text-white/45 mt-2">{Math.round(eaten)} kcal gegessen{protein > 0 ? ` · ${Math.round(protein)} g Protein` : ''}</p>
+      </div>
+
+      <div className="card divide-y divide-white/5">
+        {!todayLogs.length && <p className="text-sm text-white/45 py-2">Heute noch nichts eingetragen – unten „+ Kalorien" oder „Barcode".</p>}
+        {todayLogs.map(l => (
+          <div key={l.id} className="flex items-center justify-between py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{l.product_name ?? l.label ?? 'Eintrag'}</p>
+              <p className="text-[11px] text-white/40">
+                {new Date(l.logged_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                {l.amount_g ? ` · ${l.amount_g} g` : ''}{l.source === 'barcode' ? ' · gescannt' : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="font-semibold">{Math.round(Number(l.kcal))} kcal</span>
+              <button className="text-white/30" onClick={async () => { await deleteCalorieLog(l.id); onChange() }}>✕</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -247,9 +282,11 @@ function History({ logs, target }: { logs: CalorieLog[]; target: number | null }
 }
 
 // ---------- Ziel & persönliche Daten ----------
-function GoalSettings({ uid, settings, breakdown, currentWeight, onChange }: {
+function GoalSettings({ uid, settings, breakdown, currentWeight, autoWpw, load, onChange }: {
   uid: string; settings: Settings; breakdown: ReturnType<typeof calorieTarget> | null
-  currentWeight: number | null; onChange: () => void
+  currentWeight: number | null; autoWpw: number | null
+  load: { avgSessionMin: number | null; avgTonnageKg: number | null; observedPerWeek: number }
+  onChange: () => void
 }) {
   const save = async (patch: Partial<Settings>) => { await updateSettings(uid, patch); onChange() }
   const [showWhy, setShowWhy] = useState(true)
@@ -289,16 +326,25 @@ function GoalSettings({ uid, settings, breakdown, currentWeight, onChange }: {
               className={cls('btn !py-2 text-sm', settings.goal_type === g ? 'btn-primary' : 'btn-ghost')}>{GOAL_LABEL[g]}</button>
           ))}
         </div>
+        <p className="text-[11px] text-white/40">
+          Cut = optimale Abnehmrate (~0,5 % Körpergewicht/Woche), um Muskeln zu halten.
+          Abnehmen = zügiger, dafür etwas mehr Muskelverlust-Risiko.
+        </p>
         <div className="flex items-center justify-between pt-1">
           <div>
             <p className="text-sm">Training einbeziehen</p>
-            <p className="text-[11px] text-white/40">Aktivitätsfaktor aus deinen echten Workouts (letzte 4 Wochen)</p>
+            <p className="text-[11px] text-white/40">
+              Ø {load.avgSessionMin ?? '–'} min · Ø {load.avgTonnageKg?.toLocaleString('de-DE') ?? '–'} kg Volumen pro Einheit (aus deinem Verlauf)
+            </p>
           </div>
           <button onClick={() => save({ calorie_training_link: !settings.calorie_training_link })}
             className={cls('w-12 h-7 rounded-full transition relative shrink-0', settings.calorie_training_link ? 'bg-primary' : 'bg-white/15')}>
             <span className={cls('absolute top-1 w-5 h-5 rounded-full bg-white transition-all', settings.calorie_training_link ? 'left-6' : 'left-1')} />
           </button>
         </div>
+        <Field label={`Geplante Trainings/Woche (auto: ${autoWpw ?? Math.round(load.observedPerWeek)} aus deinem Plan)`}
+          value={settings.planned_workouts} placeholder="auto"
+          onSave={v => save({ planned_workouts: Math.round(v) })} onClear={() => save({ planned_workouts: null })} />
       </div>
 
       <div className="card space-y-3">
