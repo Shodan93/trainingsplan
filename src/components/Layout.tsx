@@ -1,17 +1,38 @@
 import { ReactNode } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { cls } from '../lib/utils'
-import { IconHome, IconPlan, IconTrain, IconHistory, IconStats, IconUser } from './icons'
+import { IconTrain, IconScale, IconFood, IconUser } from './icons'
 
-const NAV = [
-  { to: '/', label: 'Start', Icon: IconHome },
-  { to: '/plan', label: 'Plan', Icon: IconPlan },
-  { to: '/workout', label: 'Training', Icon: IconTrain },
-  { to: '/verlauf', label: 'Verlauf', Icon: IconHistory },
-  { to: '/stats', label: 'Statistik', Icon: IconStats },
-  { to: '/profile', label: 'Profil', Icon: IconUser }
+// 4 Daumen-Tabs: Gym · Gewicht · Kalorien · Profil
+const GYM_PATHS = ['/', '/plan', '/workout', '/verlauf', '/stats']
+const TABS = [
+  { to: '/', label: 'Gym', Icon: IconTrain, isActive: (p: string) => GYM_PATHS.includes(p) || p.startsWith('/workout') },
+  { to: '/gewicht', label: 'Gewicht', Icon: IconScale, isActive: (p: string) => p.startsWith('/gewicht') },
+  { to: '/kalorien', label: 'Kalorien', Icon: IconFood, isActive: (p: string) => p.startsWith('/kalorien') },
+  { to: '/profile', label: 'Profil', Icon: IconUser, isActive: (p: string) => p.startsWith('/profile') }
 ]
+
+// Segmente innerhalb des Gym-Bereichs
+const GYM_SEGMENTS = [
+  { to: '/', label: 'Start' },
+  { to: '/plan', label: 'Plan' },
+  { to: '/verlauf', label: 'Verlauf' },
+  { to: '/stats', label: 'Statistik' }
+]
+
+export function GymTabs() {
+  const loc = useLocation()
+  return (
+    <div className="flex gap-1 -mx-1 px-1 pt-2">
+      {GYM_SEGMENTS.map(s => (
+        <Link key={s.to} to={s.to}
+          className={cls('btn flex-1 !py-1.5 text-sm',
+            loc.pathname === s.to ? 'btn-primary' : 'btn-ghost')}>{s.label}</Link>
+      ))}
+    </div>
+  )
+}
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { profile } = useAuth()
@@ -26,17 +47,27 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* Desktop sidebar */}
       <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-white/5 p-4 gap-1 sticky top-0 h-screen">
         <div className="px-3 py-3 mb-2">
-          <span className="font-bold text-lg tracking-tight">Trainingsplan</span>
+          <span className="font-bold text-lg tracking-tight">Fitness</span>
         </div>
-        {NAV.map(({ to, label, Icon }) => (
-          <NavLink key={to} to={to} end={to === '/'}
-            className={({ isActive }) => cls(
+        {TABS.map(({ to, label, Icon, isActive }) => (
+          <NavLink key={to} to={to}
+            className={cls(
               'flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition',
-              isActive ? 'bg-primary/15 text-primary' : 'text-white/55 hover:bg-white/5'
+              isActive(loc.pathname) ? 'bg-primary/15 text-primary' : 'text-white/55 hover:bg-white/5'
             )}>
             <Icon /> {label}
           </NavLink>
         ))}
+        {GYM_PATHS.includes(loc.pathname) && (
+          <div className="mt-2 ml-4 flex flex-col gap-0.5">
+            {GYM_SEGMENTS.map(s => (
+              <Link key={s.to} to={s.to}
+                className={cls('px-3 py-1.5 rounded-lg text-sm', loc.pathname === s.to ? 'text-primary' : 'text-white/45 hover:text-white/70')}>
+                {s.label}
+              </Link>
+            ))}
+          </div>
+        )}
         <div className="mt-auto px-3 py-2 text-sm text-white/40">{profile?.display_name}</div>
       </aside>
 
@@ -45,14 +76,14 @@ export default function Layout({ children }: { children: ReactNode }) {
         <main className="px-4 pt-safe md:pt-6">{children}</main>
       </div>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav – 4 Daumen-Tabs */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur border-t border-white/10 pb-safe">
         <div className="flex">
-          {NAV.map(({ to, label, Icon }) => (
-            <NavLink key={to} to={to} end={to === '/'}
-              className={({ isActive }) => cls(
-                'flex-1 flex flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition',
-                isActive ? 'text-primary' : 'text-white/40'
+          {TABS.map(({ to, label, Icon, isActive }) => (
+            <NavLink key={to} to={to}
+              className={cls(
+                'flex-1 flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition',
+                isActive(loc.pathname) ? 'text-primary' : 'text-white/40'
               )}>
               <Icon />
               {label}

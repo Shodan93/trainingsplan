@@ -13,6 +13,36 @@ export type Settings = {
   notifications_enabled: boolean
   theme: string
   units: string
+  birth_year: number | null
+  height_cm: number | null
+  sex: string | null
+  goal_type: string | null
+  goal_weight: number | null
+  calorie_training_link: boolean
+  calorie_override: number | null
+}
+
+export type WeightLog = {
+  id: string
+  user_id: string
+  measured_at: string
+  weight: number
+}
+
+export type CalorieLog = {
+  id: string
+  user_id: string
+  logged_at: string
+  day: string
+  kcal: number
+  label: string | null
+  source: string
+  barcode: string | null
+  product_name: string | null
+  amount_g: number | null
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
 }
 
 export type UserStats = {
@@ -163,13 +193,14 @@ export const MUSCLE_LABELS: Record<string, string> = {
   other: 'Sonstige'
 }
 
+// Bewusst unterscheidbare Farben pro Muskelgruppe (Pull ≠ Glutes!)
 export const MUSCLE_HEX: Record<string, string> = {
-  push: '#f59e0b',
+  push: '#f97316',
   pull: '#22c55e',
   arms: '#a855f7',
   core: '#ec4899',
   legs: '#eab308',
-  glutes: '#22c55e',
+  glutes: '#14b8a6',
   posterior: '#94a3b8',
   prehab: '#ef4444',
   home: '#3b82f6',

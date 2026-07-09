@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import {
   Plan, PlanDay, PlanExercise, WorkoutSession, SetLog, Goal,
   BodyMeasurement, DiaryEntry, WeeklyTarget, UserStats, Badge, UserBadge,
-  MotivationTip, Profile, Settings
+  MotivationTip, Profile, Settings, WeightLog, CalorieLog
 } from './types'
 
 export type WorkoutBootstrap = {
@@ -286,6 +286,48 @@ export async function getUserBadges(uid: string): Promise<UserBadge[]> {
 }
 export async function awardBadge(uid: string, code: string) {
   await supabase.from('user_badges').upsert({ user_id: uid, badge_code: code }).select()
+}
+
+// ---- Gewicht ----
+export async function getWeightLogs(uid: string, limit = 1000): Promise<WeightLog[]> {
+  const { data } = await supabase.from('weight_logs').select('*')
+    .eq('user_id', uid).order('measured_at', { ascending: false }).limit(limit)
+  return (data ?? []) as WeightLog[]
+}
+export async function addWeightLog(uid: string, weight: number, measuredAt?: string): Promise<WeightLog> {
+  const { data, error } = await supabase.from('weight_logs')
+    .insert({ user_id: uid, weight, ...(measuredAt ? { measured_at: measuredAt } : {}) }).select().single()
+  if (error) throw error
+  return data as WeightLog
+}
+export async function updateWeightLog(id: string, patch: { weight?: number; measured_at?: string }) {
+  await supabase.from('weight_logs').update(patch).eq('id', id)
+}
+export async function deleteWeightLog(id: string) {
+  await supabase.from('weight_logs').delete().eq('id', id)
+}
+
+// ---- Kalorien ----
+export async function getCalorieLogs(uid: string, sinceDay: string): Promise<CalorieLog[]> {
+  const { data } = await supabase.from('calorie_logs').select('*')
+    .eq('user_id', uid).gte('day', sinceDay).order('logged_at', { ascending: false })
+  return (data ?? []) as CalorieLog[]
+}
+export async function addCalorieLog(log: Partial<CalorieLog>): Promise<CalorieLog> {
+  const { data, error } = await supabase.from('calorie_logs').insert(log).select().single()
+  if (error) throw error
+  return data as CalorieLog
+}
+export async function deleteCalorieLog(id: string) {
+  await supabase.from('calorie_logs').delete().eq('id', id)
+}
+// Ø Workouts/Woche aus den letzten 28 Tagen (für Kalorien-Aktivitätsfaktor)
+export async function workoutsPerWeek(uid: string): Promise<number> {
+  const since = new Date(Date.now() - 28 * 86400000).toISOString()
+  const { count } = await supabase.from('workout_sessions')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', uid).not('completed_at', 'is', null).gte('completed_at', since)
+  return Math.round(((count ?? 0) / 4) * 10) / 10
 }
 
 export async function getTips(): Promise<MotivationTip[]> {

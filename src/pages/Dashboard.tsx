@@ -4,8 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getStats, getActivePlan, getDays, tipOfTheDay, getWeeklyTarget, ensureWeeklyTarget,
-  getProfiles, getOpenSession, deleteSession, countCompletedSessionsInWeek, getDeloadInfo
+  getProfiles, getOpenSession, deleteSession, countCompletedSessionsInWeek, getDeloadInfo, startSession
 } from '../lib/db'
+import { GymTabs } from '../components/Layout'
 import { UserStats, Profile } from '../lib/types'
 import { greeting, isoWeekStart, cls, fmtDateTime } from '../lib/utils'
 import { PageSkeleton, ProgressBar, Chip, Modal } from '../components/ui'
@@ -57,10 +58,31 @@ export default function Dashboard() {
     [days, todayWd]
   )
 
+  const [starting, setStarting] = useState(false)
+  // Direktstart: heutiges Training sofort beginnen (offene Session wird fortgesetzt)
+  async function startToday() {
+    if (starting || !profile) return
+    setStarting(true)
+    try {
+      if (openSession) { nav(`/workout/run/${openSession.id}`); return }
+      if (plan && suggestedDay) {
+        const s = await startSession({
+          user_id: profile.id, plan_id: plan.id, plan_day_id: suggestedDay.id,
+          day_title: `${suggestedDay.weekday} · ${suggestedDay.title}`, is_deload: false
+        })
+        qc.invalidateQueries({ queryKey: ['dashboard'] })
+        nav(`/workout/run/${s.id}`)
+        return
+      }
+      nav('/workout')
+    } catch { nav('/workout') } finally { setStarting(false) }
+  }
+
   if (isLoading) return <PageSkeleton rows={5} />
 
   return (
     <div className="space-y-4 py-2">
+      <div className="md:hidden"><GymTabs /></div>
       <header className="pt-2">
         <p className="text-sm text-white/45">{greeting()},</p>
         <h1 className="text-2xl font-bold">{profile?.display_name}</h1>
@@ -108,8 +130,11 @@ export default function Dashboard() {
         ) : (
           <h2 className="text-xl font-bold mt-0.5">Kein fester Tag – frei wählen</h2>
         )}
-        <button className="btn-primary w-full mt-3 text-base py-3" onClick={() => nav('/workout')}>
-          Training starten
+        <button className="btn-primary w-full mt-3 text-base py-3" disabled={starting} onClick={startToday}>
+          {starting ? 'Startet…' : openSession ? 'Training fortsetzen' : 'Training starten'}
+        </button>
+        <button className="w-full mt-2 text-xs text-white/45 underline underline-offset-2" onClick={() => nav('/workout')}>
+          Anderes Training wählen
         </button>
       </div>
 

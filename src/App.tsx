@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './lib/auth'
-import { Spinner } from './components/ui'
+import { Spinner, PageSkeleton } from './components/ui'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -12,6 +12,8 @@ import { ReactNode, lazy, Suspense } from 'react'
 
 const Stats = lazy(() => import('./pages/Stats'))
 const PlanPage = lazy(() => import('./pages/Plan'))
+const Weight = lazy(() => import('./pages/Weight'))
+const Calories = lazy(() => import('./pages/Calories'))
 
 function Protected({ children }: { children: ReactNode }) {
   const { session, loading } = useAuth()
@@ -21,17 +23,21 @@ function Protected({ children }: { children: ReactNode }) {
   return <Layout>{children}</Layout>
 }
 
+const lazyPage = (el: ReactNode) => <Suspense fallback={<PageSkeleton rows={4} />}>{el}</Suspense>
+
 export default function App() {
   const { session, loading } = useAuth()
   return (
     <Routes>
       <Route path="/login" element={session && !loading ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
-      <Route path="/plan" element={<Protected><Suspense fallback={<Spinner label="Lade Plan…" />}><PlanPage /></Suspense></Protected>} />
+      <Route path="/plan" element={<Protected>{lazyPage(<PlanPage />)}</Protected>} />
       <Route path="/workout" element={<Protected><WorkoutPicker /></Protected>} />
       <Route path="/workout/run/:sessionId" element={<Protected><WorkoutRun /></Protected>} />
       <Route path="/verlauf" element={<Protected><History /></Protected>} />
-      <Route path="/stats" element={<Protected><Suspense fallback={<Spinner label="Lade Statistik…" />}><Stats /></Suspense></Protected>} />
+      <Route path="/stats" element={<Protected>{lazyPage(<Stats />)}</Protected>} />
+      <Route path="/gewicht" element={<Protected>{lazyPage(<Weight />)}</Protected>} />
+      <Route path="/kalorien" element={<Protected>{lazyPage(<Calories />)}</Protected>} />
       <Route path="/profile" element={<Protected><Profile /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

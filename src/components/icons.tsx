@@ -44,6 +44,21 @@ export function IconUser({ className }: P) {
     </svg>
   )
 }
+export function IconScale({ className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? base}>
+      <rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8.5 9.5a5 5 0 0 1 7 0" /><path d="M12 12l2-2.5" />
+    </svg>
+  )
+}
+export function IconFood({ className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? base}>
+      <path d="M12 8c0-2.5 1.5-4 3.5-4" />
+      <path d="M12 7.5c-1.2-1.6-3.4-2-5-.8C4.6 8.4 4 11.6 5.6 14.9c1.4 3 3.4 5.1 5 5.1.6 0 1-.3 1.4-.3s.8.3 1.4.3c1.6 0 3.6-2.1 5-5.1 1.6-3.3 1-6.5-1.4-8.2-1.6-1.2-3.8-.8-5 .8Z" />
+    </svg>
+  )
+}
 export function IconFlame({ className }: P) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? base}>

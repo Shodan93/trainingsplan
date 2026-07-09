@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Trainingsplan',
-        short_name: 'Training',
-        description: 'Trainingsplan-App für David & Svenja – Pläne, Workout-Modus, Progression & Gamification',
+        name: 'Fitness',
+        short_name: 'Fitness',
+        description: 'Fitness-App für David & Svenja – Training, Gewicht & Kalorien',
         theme_color: '#0ea5e9',
         background_color: '#0b1020',
         display: 'standalone',

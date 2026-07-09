@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
+import { GymTabs } from '../components/Layout'
 import {
   getProfiles, getActivePlan, getDays, getDayExercises,
   updatePlan, updateExercise, addExercise, deleteExercise, addDay, updateDay, deleteDay, reorderExercises
@@ -95,6 +96,7 @@ export default function PlanPage() {
 
   return (
     <div className="space-y-4 py-2">
+      <div className="md:hidden"><GymTabs /></div>
       <div className="flex items-center justify-between pt-2">
         <h1 className="text-2xl font-bold">Plan</h1>
         {isOwn && plan && (

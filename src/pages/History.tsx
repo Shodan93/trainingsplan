@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
+import { GymTabs } from '../components/Layout'
 import {
   getSessions, setLogsForSessions, deleteSession,
   getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume, recomputeStats
@@ -33,6 +34,7 @@ export default function History() {
 
   return (
     <div className="space-y-4 py-2">
+      <div className="md:hidden"><GymTabs /></div>
       <h1 className="text-2xl font-bold pt-2">Trainingsverlauf</h1>
       {!sessions.length ? (
         <EmptyState icon="📭" title="Noch keine Trainings" hint="Deine abgeschlossenen Trainings erscheinen hier – mit Übungen und Notiz." />
