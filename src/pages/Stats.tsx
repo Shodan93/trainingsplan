@@ -5,14 +5,17 @@ import {
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts'
 import { useAuth } from '../lib/auth'
-import { getSessions, setLogsForSessions } from '../lib/db'
-import { SetLog, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
-import { PageSkeleton, EmptyState, Stat } from '../components/ui'
-import { fmtDate, fmtDuration, isoWeekStart, MOODS } from '../lib/utils'
+import { getSessions, setLogsForSessions, updateSetLogById, deleteSetLog, recomputeSessionVolume } from '../lib/db'
+import { SetLog, WorkoutSession, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
+import { PageSkeleton, EmptyState, Stat, Modal } from '../components/ui'
+import { fmtDate, fmtDuration, isoWeekStart, MOODS, parseNum } from '../lib/utils'
+import { useQueryClient } from '@tanstack/react-query'
 
 export default function Stats() {
   const { profile } = useAuth()
+  const qc = useQueryClient()
   const [exPick, setExPick] = useState<string>('')
+  const [prEdit, setPrEdit] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['stats', profile?.id],
@@ -225,13 +228,21 @@ export default function Stats() {
         <Card title="🏅 Bestleistungen (Top-Gewicht je Übung)">
           <div className="space-y-1.5">
             {prs.map(([name, v]) => (
-              <div key={name} className="flex items-center justify-between text-sm">
+              <button key={name} onClick={() => setPrEdit(name)}
+                className="w-full flex items-center justify-between text-sm text-left active:scale-[0.99]">
                 <span className="text-white/80 truncate pr-2">{name}</span>
-                <span className="font-semibold text-accent shrink-0">{v.weight} kg{v.reps ? ` × ${v.reps}` : ''}</span>
-              </div>
+                <span className="font-semibold text-accent shrink-0">{v.weight} kg{v.reps ? ` × ${v.reps}` : ''} <span className="text-white/25">✎</span></span>
+              </button>
             ))}
           </div>
+          <p className="text-[11px] text-white/35 mt-2">Antippen, um die Top-Sätze zu korrigieren (z. B. Tippfehler).</p>
         </Card>
+      )}
+
+      {prEdit && (
+        <PrEditor name={prEdit} logs={logs} sessions={sessions}
+          onClose={() => setPrEdit(null)}
+          onChanged={() => { setPrEdit(null); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['history'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }) }} />
       )}
 
       <p className="text-center text-xs text-white/35 pb-2">Einzelne Trainings findest du im Tab „Verlauf".</p>
@@ -249,3 +260,71 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
     </div>
   )
 }
+
+// Bestleistung korrigieren: Top-Sätze der Übung editieren/löschen –
+// PR & Statistiken berechnen sich danach automatisch aus den Trainingsdaten neu
+function PrEditor({ name, logs, sessions, onClose, onChanged }: {
+  name: string; logs: SetLog[]; sessions: WorkoutSession[]
+  onClose: () => void; onChanged: () => void
+}) {
+  const sessionDate = useMemo(() => {
+    const m: Record<string, string> = {}
+    sessions.forEach(s => { m[s.id] = s.completed_at ?? s.started_at })
+    return m
+  }, [sessions])
+
+  const top = useMemo(() =>
+    logs.filter(l => l.exercise_name === name && l.weight != null)
+      .sort((a, b) => Number(b.weight) - Number(a.weight))
+      .slice(0, 8),
+  [logs, name])
+
+  const [drafts, setDrafts] = useState<Record<string, { weight: string; reps: string }>>(() =>
+    Object.fromEntries(top.map(l => [l.id, { weight: String(l.weight ?? ''), reps: String(l.reps ?? '') }])))
+  const [deleted, setDeleted] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    setBusy(true)
+    const touched = new Set<string>()
+    for (const l of top) {
+      if (deleted.has(l.id)) { await deleteSetLog(l.id); touched.add(l.session_id); continue }
+      const d = drafts[l.id]
+      const w = parseNum(d.weight), r = parseNum(d.reps)
+      if (w !== Number(l.weight) || r !== (l.reps ?? null)) {
+        await updateSetLogById(l.id, { weight: w, reps: r != null ? Math.round(r) : null })
+        touched.add(l.session_id)
+      }
+    }
+    for (const sid of touched) await recomputeSessionVolume(sid)
+    setBusy(false); onChanged()
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Bestleistung: ${name}`}>
+      <div className="space-y-3">
+        <p className="text-xs text-white/45">Die schwersten Sätze dieser Übung. Korrigiere Tippfehler oder lösche fehlerhafte Sätze – Bestleistung und Statistiken aktualisieren sich automatisch.</p>
+        <div className="space-y-1.5">
+          {top.map(l => (
+            <div key={l.id} className={cls2('grid grid-cols-[5rem_1fr_1fr_2rem] gap-2 items-center', deleted.has(l.id) && 'opacity-35 line-through')}>
+              <span className="text-[11px] text-white/45">{fmtDate(sessionDate[l.session_id] ?? '')}</span>
+              <input className="input !py-1.5 text-center" type="text" inputMode="decimal"
+                value={drafts[l.id]?.weight ?? ''} placeholder="kg" disabled={deleted.has(l.id)}
+                onChange={e => setDrafts(p => ({ ...p, [l.id]: { ...p[l.id], weight: e.target.value } }))} />
+              <input className="input !py-1.5 text-center" type="text" inputMode="numeric"
+                value={drafts[l.id]?.reps ?? ''} placeholder="reps" disabled={deleted.has(l.id)}
+                onChange={e => setDrafts(p => ({ ...p, [l.id]: { ...p[l.id], reps: e.target.value } }))} />
+              <button className="text-white/30 text-sm" onClick={() =>
+                setDeleted(p => { const n = new Set(p); n.has(l.id) ? n.delete(l.id) : n.add(l.id); return n })}>
+                {deleted.has(l.id) ? '↩︎' : '🗑️'}
+              </button>
+            </div>
+          ))}
+        </div>
+        <button className="btn-primary w-full" disabled={busy} onClick={save}>{busy ? 'Speichern…' : 'Speichern'}</button>
+      </div>
+    </Modal>
+  )
+}
+
+const cls2 = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(' ')

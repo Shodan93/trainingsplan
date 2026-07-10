@@ -48,16 +48,21 @@ export function levelProgress(xp: number, level: number) {
   return { cur, next, pct: Math.min(100, Math.max(0, ((xp - cur) / span) * 100)) }
 }
 
+// Lokales Datum als YYYY-MM-DD – toISOString() würde nach UTC springen
+// (aus Montag 00:00 deutscher Zeit wird sonst Sonntag 22:00 UTC)
+export function localDateISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function isoWeekStart(d = new Date()) {
   const date = new Date(d)
   const day = (date.getDay() + 6) % 7 // Mon=0
   date.setDate(date.getDate() - day)
-  date.setHours(0, 0, 0, 0)
-  return date.toISOString().slice(0, 10)
+  return localDateISO(date)
 }
 
 export function todayISO() {
-  return new Date().toISOString().slice(0, 10)
+  return localDateISO()
 }
 
 // Anstrengungs-Anweisung pro Übung (evidenzbasiert, statt RIR-Logging)

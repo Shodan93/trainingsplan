@@ -44,6 +44,29 @@ export type CalorieLog = {
   protein_g: number | null
   carbs_g: number | null
   fat_g: number | null
+  image_url: string | null
+}
+
+export type MealItem = {
+  name: string
+  amount_g: number | null
+  kcal: number
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
+}
+
+export type Meal = {
+  id: string
+  user_id: string
+  name: string
+  kcal: number
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
+  items: MealItem[]
+  image_url: string | null
+  created_at: string
 }
 
 export type UserStats = {

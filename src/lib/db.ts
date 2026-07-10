@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import {
   Plan, PlanDay, PlanExercise, WorkoutSession, SetLog, Goal,
   BodyMeasurement, DiaryEntry, WeeklyTarget, UserStats, Badge, UserBadge,
-  MotivationTip, Profile, Settings, WeightLog, CalorieLog
+  MotivationTip, Profile, Settings, WeightLog, CalorieLog, Meal
 } from './types'
 
 export type WorkoutBootstrap = {
@@ -44,15 +44,17 @@ export async function recomputeStats(uid: string) {
 }
 // Abgeschlossene Workouts in einer Woche (robust aus den Sessions, kein Counter)
 export async function countCompletedSessionsInWeek(uid: string, weekStartISO: string): Promise<number> {
-  const end = new Date(weekStartISO)
+  // Wochengrenzen in LOKALER Zeit in Timestamps übersetzen (Mo 00:00 – Mo 00:00)
+  const start = new Date(weekStartISO + 'T00:00:00')
+  const end = new Date(start)
   end.setDate(end.getDate() + 7)
   const { count } = await supabase
     .from('workout_sessions')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', uid)
     .not('completed_at', 'is', null)
-    .gte('completed_at', weekStartISO)
-    .lt('completed_at', end.toISOString().slice(0, 10))
+    .gte('completed_at', start.toISOString())
+    .lt('completed_at', end.toISOString())
   return count ?? 0
 }
 
@@ -321,7 +323,25 @@ export async function addCalorieLog(log: Partial<CalorieLog>): Promise<CalorieLo
 export async function deleteCalorieLog(id: string) {
   await supabase.from('calorie_logs').delete().eq('id', id)
 }
-// Ø Workouts/Woche aus den letzten 28 Tagen (für Kalorien-Aktivitätsfaktor)
+export async function updateCalorieLog(id: string, patch: Partial<CalorieLog>) {
+  await supabase.from('calorie_logs').update(patch).eq('id', id)
+}
+
+// ---- Mahlzeiten ----
+export async function getMeals(uid: string): Promise<Meal[]> {
+  const { data } = await supabase.from('meals').select('*')
+    .eq('user_id', uid).order('created_at', { ascending: false })
+  return (data ?? []) as Meal[]
+}
+export async function addMeal(meal: Partial<Meal>): Promise<Meal> {
+  const { data, error } = await supabase.from('meals').insert(meal).select().single()
+  if (error) throw error
+  return data as Meal
+}
+export async function deleteMeal(id: string) {
+  await supabase.from('meals').delete().eq('id', id)
+}
+
 // Echte Trainingslast für die Kalorienrechnung: Ø Dauer & Ø Volumen aus den
 // letzten 28 Tagen plus geplante Frequenz aus dem aktiven Plan (Anzahl Plan-Tage)
 export type TrainingLoad = {

@@ -32,7 +32,8 @@ export default function Dashboard() {
         getStats(uid), getActivePlan(uid), tipOfTheDay(), getProfiles(), getOpenSession(uid), getDeloadInfo(uid)
       ])
       const days = plan ? await getDays(plan.id) : []
-      await ensureWeeklyTarget(uid, ws)
+      // Standard-Wochenziel = Anzahl der Plan-Tage (im Profil weiter anpassbar)
+      await ensureWeeklyTarget(uid, ws, days.length || 4)
       const [week, weekDone] = await Promise.all([getWeeklyTarget(uid, ws), countCompletedSessionsInWeek(uid, ws)])
       const anchor = deload.lastDeload ?? deload.firstSession
       const deloadDue = !!anchor && (Date.now() - new Date(anchor).getTime()) > 42 * 86400000

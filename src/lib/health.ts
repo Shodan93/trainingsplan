@@ -189,22 +189,51 @@ export function calorieTarget(opts: {
 
 // ---------- Open Food Facts ----------
 export type OffProduct = {
+  code: string
   name: string; brand: string | null
   kcal100: number | null; protein100: number | null; carbs100: number | null; fat100: number | null
+  image: string | null
 }
+
+function mapOffProduct(p: Record<string, unknown>): OffProduct {
+  const n = (p.nutriments ?? {}) as Record<string, number | undefined>
+  const kcal = n['energy-kcal_100g'] ?? (n['energy_100g'] ? n['energy_100g']! / 4.184 : null)
+  return {
+    code: String(p.code ?? ''),
+    name: (p.product_name as string) || (p.generic_name as string) || 'Unbekanntes Produkt',
+    brand: (p.brands as string) || null,
+    kcal100: kcal != null ? Math.round(kcal) : null,
+    protein100: n.proteins_100g ?? null,
+    carbs100: n.carbohydrates_100g ?? null,
+    fat100: n.fat_100g ?? null,
+    image: (p.image_front_small_url as string) || (p.image_small_url as string) || (p.image_front_url as string) || null
+  }
+}
+
 export async function lookupBarcode(code: string): Promise<OffProduct | null> {
   const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`)
   if (!res.ok) return null
   const j = await res.json()
   if (j.status !== 1 || !j.product) return null
-  const n = j.product.nutriments ?? {}
-  const kcal = n['energy-kcal_100g'] ?? (n['energy_100g'] ? n['energy_100g'] / 4.184 : null)
-  return {
-    name: j.product.product_name || j.product.generic_name || 'Unbekanntes Produkt',
-    brand: j.product.brands || null,
-    kcal100: kcal != null ? Math.round(kcal) : null,
-    protein100: n.proteins_100g ?? null,
-    carbs100: n.carbohydrates_100g ?? null,
-    fat100: n.fat_100g ?? null
-  }
+  return mapOffProduct({ ...j.product, code })
+}
+
+// Freitext-Suche (deutschsprachige Produkte bevorzugt)
+export async function searchProducts(query: string): Promise<OffProduct[]> {
+  const url = 'https://world.openfoodfacts.org/cgi/search.pl'
+    + `?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=20`
+    + '&fields=code,product_name,generic_name,brands,image_front_small_url,image_small_url,nutriments'
+    + '&sort_by=unique_scans_n&lc=de&cc=de'
+  const res = await fetch(url)
+  if (!res.ok) return []
+  const j = await res.json()
+  return ((j.products ?? []) as Record<string, unknown>[])
+    .map(mapOffProduct)
+    .filter(p => p.kcal100 != null)
+}
+
+// ---------- KI-Kalorienschätzung (Edge Function → Claude) ----------
+export type AiEstimate = {
+  items: { name: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number }[]
+  note: string
 }
