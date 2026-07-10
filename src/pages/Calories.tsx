@@ -9,7 +9,7 @@ import {
 import { CalorieLog, Meal, MealItem, Settings } from '../lib/types'
 import {
   calorieTarget, GOAL_LABEL, GoalType, lookupBarcode, searchProducts,
-  OffProduct, AiEstimate, recommendedGoalWeight
+  OffProduct, AiEstimate, recommendedGoalWeight, macroTargets, MacroTargets
 } from '../lib/health'
 import { PageSkeleton, Modal, ProgressBar, Spinner } from '../components/ui'
 import { BottomBar, SegmentRow } from '../components/Layout'
@@ -75,6 +75,10 @@ export default function Calories() {
     })
   }, [settings, data, plannedWpw])
   const target = settings?.calorie_override ?? breakdown?.target ?? null
+  // Makro-Soll aus effektivem Kalorienziel + Körpergewicht
+  const macros = target != null && data?.currentWeight
+    ? macroTargets(target, data.currentWeight, (breakdown?.adjust ?? 0) < 0)
+    : null
   const uid = profile?.id ?? ''
 
   function openSheet(day?: string) {
@@ -110,7 +114,7 @@ export default function Calories() {
       {lookupBusy && <div className="card"><Spinner label="Produkt wird gesucht…" /></div>}
       {lookupErr && <div className="card text-sm text-red-200 bg-danger/10 border-danger/25">{lookupErr}</div>}
 
-      {seg === 'Heute' && <Today logs={logs} target={target} onEdit={setEditEntry} />}
+      {seg === 'Heute' && <Today logs={logs} target={target} macros={macros} onEdit={setEditEntry} />}
       {seg === 'Kalender' && <CalendarView logs={logs} target={target} onDay={setDayDetail} />}
       {seg === 'Ziel' && settings && (
         <GoalSettings uid={uid} settings={settings} breakdown={breakdown}
@@ -219,7 +223,7 @@ export default function Calories() {
         <EditEntry entry={editEntry} onClose={() => setEditEntry(null)} onChanged={() => { setEditEntry(null); refresh() }} />
       )}
       {dayDetail && (
-        <DayDetail day={dayDetail} logs={logs.filter(l => l.day === dayDetail)} target={target}
+        <DayDetail day={dayDetail} logs={logs.filter(l => l.day === dayDetail)} target={target} macros={macros}
           onClose={() => setDayDetail(null)}
           onAdd={() => { setDayDetail(null); openSheet(dayDetail) }}
           onEdit={l => { setDayDetail(null); setEditEntry(l) }} />
@@ -252,21 +256,36 @@ function EntryRow({ l, onClick }: { l: CalorieLog; onClick?: () => void }) {
   )
 }
 
-function MacroLine({ logs }: { logs: CalorieLog[] }) {
+// Makros: gegessen vs. Soll als Progress-Bars (Soll aus Kalorienziel + Körpergewicht)
+function MacroBars({ logs, targets }: { logs: CalorieLog[]; targets: MacroTargets | null }) {
   const p = sum(logs.map(l => l.protein_g)), c = sum(logs.map(l => l.carbs_g)), f = sum(logs.map(l => l.fat_g))
-  if (p + c + f === 0) return null
+  if (!targets && p + c + f === 0) return null
+  const rows: { label: string; eaten: number; goal: number | null; color: string }[] = [
+    { label: 'Protein', eaten: p, goal: targets?.protein ?? null, color: '#38bdf8' },
+    { label: 'Kohlenhydrate', eaten: c, goal: targets?.carbs ?? null, color: '#f59e0b' },
+    { label: 'Fett', eaten: f, goal: targets?.fat ?? null, color: '#fb7185' }
+  ]
   return (
-    <div className="flex gap-2 mt-2">
-      <span className="chip bg-sky-500/15 text-sky-300">Protein {Math.round(p)} g</span>
-      <span className="chip bg-amber-500/15 text-amber-300">Kohlenhydrate {Math.round(c)} g</span>
-      <span className="chip bg-rose-500/15 text-rose-300">Fett {Math.round(f)} g</span>
+    <div className="space-y-2 mt-3">
+      {rows.map(m => (
+        <div key={m.label}>
+          <div className="flex items-baseline justify-between mb-1">
+            <span className="text-xs text-white/55">{m.label}</span>
+            <span className="text-xs font-semibold">
+              {Math.round(m.eaten)}{m.goal != null && <span className="text-white/40 font-normal"> / {m.goal} g</span>}
+              {m.goal == null && ' g'}
+            </span>
+          </div>
+          <ProgressBar pct={m.goal ? (m.eaten / m.goal) * 100 : 0} color={m.color} />
+        </div>
+      ))}
     </div>
   )
 }
 
 // ---------- Heute ----------
-function Today({ logs, target, onEdit }:
-  { logs: CalorieLog[]; target: number | null; onEdit: (l: CalorieLog) => void }) {
+function Today({ logs, target, macros, onEdit }:
+  { logs: CalorieLog[]; target: number | null; macros: MacroTargets | null; onEdit: (l: CalorieLog) => void }) {
   const today = todayISO()
   const todayLogs = logs.filter(l => l.day === today)
   const eaten = sum(todayLogs.map(l => l.kcal))
@@ -284,7 +303,7 @@ function Today({ logs, target, onEdit }:
         </p>
         <ProgressBar className="mt-3" pct={target ? (eaten / target) * 100 : 0} color={remaining != null && remaining < 0 ? '#ef4444' : '#0ea5e9'} />
         <p className="text-xs text-white/45 mt-2">{Math.round(eaten)} kcal gegessen</p>
-        <MacroLine logs={todayLogs} />
+        <MacroBars logs={todayLogs} targets={macros} />
       </div>
 
       <div className="card divide-y divide-white/5">
@@ -357,8 +376,8 @@ function CalendarView({ logs, target, onDay }:
   )
 }
 
-function DayDetail({ day, logs, target, onClose, onAdd, onEdit }: {
-  day: string; logs: CalorieLog[]; target: number | null
+function DayDetail({ day, logs, target, macros, onClose, onAdd, onEdit }: {
+  day: string; logs: CalorieLog[]; target: number | null; macros: MacroTargets | null
   onClose: () => void; onAdd: () => void; onEdit: (l: CalorieLog) => void
 }) {
   const total = sum(logs.map(l => l.kcal))
@@ -370,7 +389,7 @@ function DayDetail({ day, logs, target, onClose, onAdd, onEdit }: {
           <p className="text-2xl font-bold">{Math.round(total)} <span className="text-sm font-medium text-white/45">kcal{future ? ' geplant' : ''}</span></p>
           {target != null && <p className={cls('text-sm font-semibold', total > target ? 'text-danger' : 'text-success')}>Ziel {target}</p>}
         </div>
-        <MacroLine logs={logs} />
+        <MacroBars logs={logs} targets={macros} />
         <div className="divide-y divide-white/5">
           {!logs.length && <p className="text-sm text-white/45 py-2">Keine Einträge{future ? ' – plane hier Mahlzeiten voraus' : ''}.</p>}
           {logs.map(l => <EntryRow key={l.id} l={l} onClick={() => onEdit(l)} />)}
@@ -508,31 +527,66 @@ function ProductAmount({ p, onClose, onSave }:
 }
 
 // ---------- AI fragen ----------
-function AiModal({ onClose, onSave }: { onClose: () => void; onSave: (est: AiEstimate) => void }) {
-  const [q, setQ] = useState('')
+// Chat-Fluss: Claude stellt bei unklaren Mengen bis zu 2 kurze Rückfragen,
+// dann kommt die strukturierte Schätzung
+function AiModal({ onClose, onSave, saveLabel }: {
+  onClose: () => void; onSave: (est: AiEstimate) => void; saveLabel?: string
+}) {
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [est, setEst] = useState<AiEstimate | null>(null)
 
-  async function ask() {
-    if (!q.trim() || busy) return
-    setBusy(true); setErr(null); setEst(null)
-    const { data, error } = await supabase.functions.invoke('ai-calories', { body: { question: q.trim() } })
-    if (error || data?.error) setErr(data?.error ?? 'Anfrage fehlgeschlagen – bitte erneut versuchen.')
-    else setEst(data as AiEstimate)
+  async function send() {
+    const text = input.trim()
+    if (!text || busy) return
+    const next = [...messages, { role: 'user' as const, content: text }]
+    setMessages(next); setInput(''); setBusy(true); setErr(null); setEst(null)
+    const { data, error } = await supabase.functions.invoke('ai-calories', { body: { messages: next } })
+    if (error || data?.error) {
+      setErr(data?.error ?? 'Anfrage fehlgeschlagen – bitte erneut versuchen.')
+      setMessages(messages); setInput(text) // Eingabe nicht verlieren
+    } else if (data?.type === 'question' && data.question) {
+      setMessages([...next, { role: 'assistant', content: String(data.question) }])
+    } else if (data?.type === 'estimate' && data.items?.length) {
+      setEst({ items: data.items, note: data.note ?? '' })
+    } else {
+      setErr('Unerwartete Antwort – bitte erneut versuchen.')
+    }
     setBusy(false)
   }
   const total = est ? Math.round(sum(est.items.map(i => i.kcal))) : 0
+  const awaitingAnswer = !est && messages.length > 0 && messages[messages.length - 1].role === 'assistant'
 
   return (
     <Modal open onClose={onClose} title="✨ AI fragen">
       <div className="space-y-3">
-        <textarea className="input min-h-[80px]" value={q} onChange={e => setQ(e.target.value)} autoFocus
-          placeholder="Beschreibe, was du gegessen hast – z. B. „Schweinebraten im Restaurant mit zwei Knödeln, Soße und einem Bier”" />
-        <button className="btn-primary w-full" disabled={busy || !q.trim()} onClick={ask}>
-          {busy ? 'Claude schätzt…' : est ? 'Neu schätzen' : 'Kalorien schätzen'}
-        </button>
+        {messages.map((m, i) => (
+          <p key={i} className={cls('text-sm rounded-2xl px-3.5 py-2.5 max-w-[90%]',
+            m.role === 'user' ? 'bg-primary/20 ml-auto' : 'bg-white/5')}>
+            {m.role === 'assistant' && <span className="mr-1">✨</span>}{m.content}
+          </p>
+        ))}
+        {busy && <Spinner label="Claude denkt nach…" />}
         {err && <p className="text-sm text-red-300 bg-danger/10 rounded-xl p-3">{err}</p>}
+
+        {!est && !busy && (
+          <>
+            {messages.length === 0 ? (
+              <textarea className="input min-h-[80px]" value={input} onChange={e => setInput(e.target.value)} autoFocus
+                placeholder="Beschreibe, was du gegessen hast – z. B. „Schweinebraten im Restaurant mit zwei Knödeln, Soße und einem Bier”" />
+            ) : (
+              <input className="input" value={input} onChange={e => setInput(e.target.value)} autoFocus
+                placeholder={awaitingAnswer ? 'Deine Antwort…' : 'Ergänzung…'}
+                onKeyDown={e => e.key === 'Enter' && send()} />
+            )}
+            <button className="btn-primary w-full" disabled={!input.trim()} onClick={send}>
+              {messages.length === 0 ? 'Kalorien schätzen' : 'Antworten'}
+            </button>
+          </>
+        )}
+
         {est && (
           <div className="space-y-2">
             <div className="card bg-surface2 !p-3 divide-y divide-white/5">
@@ -551,7 +605,10 @@ function AiModal({ onClose, onSave }: { onClose: () => void; onSave: (est: AiEst
               </div>
             </div>
             <p className="text-[11px] text-white/40">{est.note}</p>
-            <button className="btn-primary w-full" onClick={() => onSave(est)}>Als Eintrag speichern ({total} kcal)</button>
+            <div className="flex gap-2">
+              <button className="btn-ghost border border-white/10" onClick={() => { setEst(null); setMessages([]); setInput('') }}>Neu</button>
+              <button className="btn-primary flex-1" onClick={() => onSave(est)}>{saveLabel ?? `Als Eintrag speichern (${total} kcal)`}</button>
+            </div>
           </div>
         )}
       </div>
@@ -595,10 +652,24 @@ function MealBuilder({ uid, onClose, onSaved }: { uid: string; onClose: () => vo
   const [items, setItems] = useState<MealItem[]>([])
   const [image, setImage] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [scanErr, setScanErr] = useState<string | null>(null)
+  const [scanBusy, setScanBusy] = useState(false)
   const [product, setProduct] = useState<OffProduct | null>(null)
   // manuelle Zutat
   const [mName, setMName] = useState(''); const [mG, setMG] = useState(''); const [mKcal, setMKcal] = useState('')
   const [busy, setBusy] = useState(false)
+
+  async function onDetect(code: string) {
+    setScanOpen(false); setScanBusy(true); setScanErr(null)
+    try {
+      const p = await lookupBarcode(code)
+      if (!p || p.kcal100 == null) setScanErr(`Produkt ${code} nicht gefunden – bitte suchen oder manuell eintragen.`)
+      else setProduct(p)
+    } catch { setScanErr('Lookup fehlgeschlagen – bist du online?') }
+    setScanBusy(false)
+  }
 
   const totals = {
     kcal: Math.round(sum(items.map(i => i.kcal))),
@@ -635,7 +706,14 @@ function MealBuilder({ uid, onClose, onSaved }: { uid: string; onClose: () => vo
           </div>
         )}
 
-        <button className="btn-ghost w-full border border-white/10" onClick={() => setSearchOpen(true)}>🔎 Zutat aus Lebensmittel-Suche</button>
+        {/* Zutaten aus allen Quellen hinzufügen */}
+        <div className="grid grid-cols-3 gap-1.5">
+          <button className="btn-ghost !px-1 border border-white/10 text-sm" onClick={() => setSearchOpen(true)}>🔎 Suche</button>
+          <button className="btn-ghost !px-1 border border-white/10 text-sm" onClick={() => setScanOpen(true)}>📷 Barcode</button>
+          <button className="btn-ghost !px-1 border border-white/10 text-sm" onClick={() => setAiOpen(true)}>✨ AI</button>
+        </div>
+        {scanBusy && <Spinner label="Produkt wird gesucht…" />}
+        {scanErr && <p className="text-sm text-red-300 bg-danger/10 rounded-xl p-3">{scanErr}</p>}
 
         <div className="card bg-surface2 !p-3 space-y-2">
           <p className="text-xs text-white/45">Zutat manuell (z. B. 200 g Milch, 30 g Butter)</p>
@@ -660,6 +738,20 @@ function MealBuilder({ uid, onClose, onSaved }: { uid: string; onClose: () => vo
 
       {searchOpen && (
         <SearchModal onClose={() => setSearchOpen(false)} onPick={p => { setSearchOpen(false); setProduct(p) }} />
+      )}
+      {scanOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[60] bg-black grid place-items-center"><Spinner label="Scanner lädt…" /></div>}>
+          <BarcodeScanner onDetect={onDetect} onClose={() => setScanOpen(false)} />
+        </Suspense>
+      )}
+      {aiOpen && (
+        <AiModal saveLabel="Als Zutaten übernehmen" onClose={() => setAiOpen(false)} onSave={(est) => {
+          setItems(prev => [...prev, ...est.items.map(i => ({
+            name: i.name, amount_g: null,
+            kcal: Math.round(i.kcal), protein_g: r1(i.protein_g), carbs_g: r1(i.carbs_g), fat_g: r1(i.fat_g)
+          }))])
+          setAiOpen(false)
+        }} />
       )}
       {product && (
         <ProductAmount p={product} onClose={() => setProduct(null)} onSave={(g) => {

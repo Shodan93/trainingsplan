@@ -1,5 +1,6 @@
 // Gewichts-Mathematik & Kalorien-Logik (wissenschaftlich fundiert, nachvollziehbar)
 import { WeightLog, Settings } from './types'
+import { supabase } from './supabase'
 
 // ---------- Gewicht ----------
 export type WeightPoint = { t: number; w: number }
@@ -218,8 +219,13 @@ export async function lookupBarcode(code: string): Promise<OffProduct | null> {
   return mapOffProduct({ ...j.product, code })
 }
 
-// Freitext-Suche (deutschsprachige Produkte bevorzugt)
+// Freitext-Suche: primär über die Edge Function (stabil, kein Browser-CORS/Rate-Limit),
+// Fallback direkt gegen Open Food Facts
 export async function searchProducts(query: string): Promise<OffProduct[]> {
+  try {
+    const { data, error } = await supabase.functions.invoke('food-search', { body: { query } })
+    if (!error && data?.products?.length) return data.products as OffProduct[]
+  } catch { /* Fallback unten */ }
   const url = 'https://world.openfoodfacts.org/cgi/search.pl'
     + `?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=20`
     + '&fields=code,product_name,generic_name,brands,image_front_small_url,image_small_url,nutriments'
@@ -236,4 +242,15 @@ export async function searchProducts(query: string): Promise<OffProduct[]> {
 export type AiEstimate = {
   items: { name: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number }[]
   note: string
+}
+
+// ---------- Makro-Ziele ----------
+// Protein nach Körpergewicht (im Defizit höher, Muskelschutz), Fett ~28 % der
+// Kalorien (hormonell sinnvolles Minimum), Kohlenhydrate füllen den Rest auf
+export type MacroTargets = { protein: number; carbs: number; fat: number }
+export function macroTargets(targetKcal: number, weightKg: number, deficit: boolean): MacroTargets {
+  const protein = Math.round(weightKg * (deficit ? 2.2 : 1.9))
+  const fat = Math.round(targetKcal * 0.28 / 9.3)
+  const carbs = Math.max(0, Math.round((targetKcal - protein * 4.1 - fat * 9.3) / 4.1))
+  return { protein, carbs, fat }
 }
