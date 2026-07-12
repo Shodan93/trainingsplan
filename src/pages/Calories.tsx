@@ -1,10 +1,11 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import {
   getSettings, updateSettings, getCalorieLogs, addCalorieLog, deleteCalorieLog, updateCalorieLog,
-  trainingLoad, getWeightLogs, getMeals, addMeal, deleteMeal
+  trainingLoad, getWeightLogs, getMeals, addMeal, deleteMeal, getMealById
 } from '../lib/db'
 import { CalorieLog, Meal, MealItem, Settings } from '../lib/types'
 import {
@@ -41,6 +42,20 @@ export default function Calories() {
   const [dayDetail, setDayDetail] = useState<string | null>(null)
   const [lookupBusy, setLookupBusy] = useState(false)
   const [lookupErr, setLookupErr] = useState<string | null>(null)
+  // Portion wählen (¼/⅓/½/…): eigene Mahlzeit oder per Link geteilte vom Partner
+  const [portionMeal, setPortionMeal] = useState<{ meal: Meal; fromShare: boolean } | null>(null)
+
+  // Geteilter Mahlzeit-Link: /kalorien?meal=<id>
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const mid = searchParams.get('meal')
+    if (!mid || !profile) return
+    setSearchParams({}, { replace: true })
+    getMealById(mid).then(m => {
+      if (m) setPortionMeal({ meal: m, fromShare: m.user_id !== profile.id })
+      else setLookupErr('Geteilte Mahlzeit nicht gefunden (wurde sie gelöscht?).')
+    })
+  }, [searchParams, profile, setSearchParams])
 
   const { data, isLoading } = useQuery({
     queryKey: ['calories', profile?.id],
@@ -194,13 +209,31 @@ export default function Calories() {
         <MealsModal meals={meals} uid={uid}
           onClose={() => setMealsOpen(false)}
           onChanged={refresh}
-          onLog={async (m) => {
+          onLog={(m) => { setMealsOpen(false); setPortionMeal({ meal: m, fromShare: false }) }} />
+      )}
+      {portionMeal && (
+        <MealPortionModal meal={portionMeal.meal} fromShare={portionMeal.fromShare}
+          onClose={() => setPortionMeal(null)}
+          onLog={async (fraction, saveCopy) => {
+            const m = portionMeal.meal
+            const pct = Math.round(fraction * 100)
             await addCalorieLog({
-              user_id: uid, day: forDay, source: 'meal', label: m.name,
-              kcal: Math.round(Number(m.kcal)), protein_g: m.protein_g, carbs_g: m.carbs_g, fat_g: m.fat_g,
+              user_id: uid, day: forDay, source: 'meal',
+              label: pct < 100 ? `${m.name} (${pct} %)` : m.name,
+              kcal: Math.round(Number(m.kcal) * fraction),
+              protein_g: m.protein_g != null ? r1(Number(m.protein_g) * fraction) : null,
+              carbs_g: m.carbs_g != null ? r1(Number(m.carbs_g) * fraction) : null,
+              fat_g: m.fat_g != null ? r1(Number(m.fat_g) * fraction) : null,
               image_url: m.image_url
             })
-            setMealsOpen(false); refresh()
+            if (saveCopy) {
+              await addMeal({
+                user_id: uid, name: m.name, kcal: m.kcal,
+                protein_g: m.protein_g, carbs_g: m.carbs_g, fat_g: m.fat_g,
+                items: m.items, image_url: m.image_url
+              })
+            }
+            setPortionMeal(null); refresh()
           }} />
       )}
       {product && (
@@ -617,6 +650,17 @@ function AiModal({ onClose, onSave, saveLabel }: {
 }
 
 // ---------- Mahlzeiten ----------
+// Link zum Teilen mit dem Partner (öffnet dort den Portions-Dialog)
+async function shareMeal(m: Meal) {
+  const url = `${location.origin}/kalorien?meal=${m.id}`
+  if (navigator.share) {
+    try { await navigator.share({ title: `${m.name} · ${Math.round(Number(m.kcal))} kcal`, url }) } catch { /* abgebrochen */ }
+  } else {
+    await navigator.clipboard.writeText(url)
+    alert('Link kopiert – schick ihn deinem Partner, dann kann er die Mahlzeit direkt eintragen.')
+  }
+}
+
 function MealsModal({ meals, uid, onClose, onChanged, onLog }: {
   meals: Meal[]; uid: string; onClose: () => void; onChanged: () => void; onLog: (m: Meal) => void
 }) {
@@ -628,7 +672,7 @@ function MealsModal({ meals, uid, onClose, onChanged, onLog }: {
         {!meals.length && <p className="text-sm text-white/45">Noch keine Mahlzeiten gespeichert – lege deine erste an (z. B. „Frühstück: Skyr + Beeren + Nüsse").</p>}
         <div className="divide-y divide-white/5">
           {meals.map(m => (
-            <div key={m.id} className="flex items-center gap-3 py-2.5">
+            <div key={m.id} className="flex items-center gap-2.5 py-2.5">
               {m.image_url
                 ? <img src={m.image_url} alt="" className="w-10 h-10 rounded-lg object-cover bg-white/5 shrink-0" />
                 : <span className="w-10 h-10 rounded-lg bg-white/5 grid place-items-center shrink-0">🍽️</span>}
@@ -637,11 +681,77 @@ function MealsModal({ meals, uid, onClose, onChanged, onLog }: {
                 <p className="text-[11px] text-white/40">{Math.round(Number(m.kcal))} kcal · {m.items.length} Zutaten</p>
               </div>
               <button className="btn-primary !px-3 !py-1.5 text-xs shrink-0" onClick={() => onLog(m)}>Eintragen</button>
-              <button className="text-white/30 shrink-0" onClick={async () => { await deleteMeal(m.id); onChanged() }}>✕</button>
+              <button className="text-white/40 shrink-0 text-sm" title="Mit Partner teilen" onClick={() => shareMeal(m)}>🔗</button>
+              <button className="text-white/30 shrink-0" onClick={async () => { if (confirm(`"${m.name}" löschen?`)) { await deleteMeal(m.id); onChanged() } }}>✕</button>
             </div>
           ))}
         </div>
         <button className="btn-ghost w-full border border-white/10" onClick={() => setBuilder(true)}>+ Neue Mahlzeit anlegen</button>
+      </div>
+    </Modal>
+  )
+}
+
+// Portion wählen: ganze Mahlzeit, Bruchteil oder eigener Prozentwert
+function MealPortionModal({ meal, fromShare, onClose, onLog }: {
+  meal: Meal; fromShare: boolean
+  onClose: () => void; onLog: (fraction: number, saveCopy: boolean) => void
+}) {
+  const [fraction, setFraction] = useState(1)
+  const [custom, setCustom] = useState('')
+  const [saveCopy, setSaveCopy] = useState(fromShare)
+  const [busy, setBusy] = useState(false)
+  const OPTIONS = [
+    { label: '¼', v: 0.25 }, { label: '⅓', v: 1 / 3 }, { label: '½', v: 0.5 },
+    { label: '¾', v: 0.75 }, { label: 'Ganz', v: 1 }
+  ]
+  const kcal = Math.round(Number(meal.kcal) * fraction)
+  return (
+    <Modal open onClose={onClose} title={fromShare ? 'Geteilte Mahlzeit' : 'Portion wählen'}>
+      <div className="space-y-3">
+        <div className="card bg-surface2 !p-3 flex items-center gap-3">
+          {meal.image_url
+            ? <img src={meal.image_url} alt="" className="w-12 h-12 rounded-lg object-cover bg-white/5 shrink-0" />
+            : <span className="w-12 h-12 rounded-lg bg-white/5 grid place-items-center shrink-0 text-xl">🍽️</span>}
+          <div className="min-w-0">
+            <p className="font-semibold text-sm">{meal.name}</p>
+            <p className="text-xs text-white/45 mt-0.5">{Math.round(Number(meal.kcal))} kcal gesamt · {meal.items.length} Zutaten</p>
+          </div>
+        </div>
+        {fromShare && <p className="text-xs text-accent">🔗 Mit dir geteilt – wird in DEINE Kalorienliste eingetragen.</p>}
+        <div>
+          <label className="label">Wie viel davon hast du gegessen?</label>
+          <div className="flex gap-1.5">
+            {OPTIONS.map(o => (
+              <button key={o.label} onClick={() => { setFraction(o.v); setCustom('') }}
+                className={cls('btn flex-1 !py-2 !px-1 text-sm', Math.abs(fraction - o.v) < 0.001 && !custom ? 'btn-primary' : 'btn-ghost')}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input className="input !py-2" type="text" inputMode="numeric" value={custom} placeholder="Eigener Wert in %"
+            onChange={e => {
+              setCustom(e.target.value)
+              const v = parseNum(e.target.value)
+              if (v != null && v > 0 && v <= 100) setFraction(v / 100)
+            }} />
+          <span className="text-sm text-white/45 shrink-0">%</span>
+        </div>
+        <p className="text-center text-sm text-white/60">
+          = <b className="text-white">{kcal} kcal</b>
+          {meal.protein_g != null && <> · {Math.round(Number(meal.protein_g) * fraction)} g Protein</>}
+        </p>
+        {fromShare && (
+          <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+            <input type="checkbox" className="accent-primary w-4 h-4" checked={saveCopy} onChange={e => setSaveCopy(e.target.checked)} />
+            Auch in meine Mahlzeiten übernehmen
+          </label>
+        )}
+        <button className="btn-primary w-full" disabled={busy} onClick={() => { setBusy(true); onLog(fraction, saveCopy) }}>
+          {busy ? 'Speichern…' : `Eintragen (${kcal} kcal)`}
+        </button>
       </div>
     </Modal>
   )

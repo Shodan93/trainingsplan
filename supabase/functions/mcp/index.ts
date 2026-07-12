@@ -239,10 +239,15 @@ const TOOLS = [
   },
   {
     name: 'log_saved_meal',
-    description: 'Eine gespeicherte Mahlzeit als Kalorien-Eintrag loggen.',
+    description: 'Eine gespeicherte Mahlzeit als Kalorien-Eintrag loggen (optional nur einen Anteil, z. B. ein Viertel).',
     inputSchema: {
       type: 'object',
-      properties: { user: USER, meal: { type: 'string', description: 'Name der Mahlzeit (Teilstring reicht)' }, day: DAY },
+      properties: {
+        user: USER,
+        meal: { type: 'string', description: 'Name der Mahlzeit (Teilstring reicht)' },
+        portion: { type: 'number', description: 'Gegessener Anteil 0–1, z. B. 0.25 für ein Viertel (Standard 1)' },
+        day: DAY
+      },
       required: ['user', 'meal']
     }
   },
@@ -429,12 +434,17 @@ async function callTool(name: string, args: Json): Promise<string> {
       if (!hits.length) throw new Error(`Mahlzeit "${args.meal}" nicht gefunden. Vorhanden: ${(data ?? []).map(m => m.name).join(', ') || 'keine'}`)
       if (hits.length > 1) throw new Error(`Mehrdeutig: ${hits.map(m => m.name).join(' | ')}`)
       const m = hits[0]
+      const portion = args.portion != null ? Number(args.portion) : 1
+      if (!(portion > 0 && portion <= 1)) throw new Error('portion muss zwischen 0 und 1 liegen.')
+      const pct = Math.round(portion * 100)
+      const kcal = Math.round(Number(m.kcal) * portion)
+      const scale = (v: unknown) => v != null ? Math.round(Number(v) * portion * 10) / 10 : null
       const { error } = await admin.from('calorie_logs').insert({
-        user_id: u.id, day, kcal: Math.round(Number(m.kcal)), label: m.name, source: 'meal',
-        protein_g: m.protein_g, carbs_g: m.carbs_g, fat_g: m.fat_g, image_url: m.image_url
+        user_id: u.id, day, kcal, label: pct < 100 ? `${m.name} (${pct} %)` : m.name, source: 'meal',
+        protein_g: scale(m.protein_g), carbs_g: scale(m.carbs_g), fat_g: scale(m.fat_g), image_url: m.image_url
       })
       if (error) throw new Error(error.message)
-      return `✓ Mahlzeit "${m.name}" (${Math.round(Number(m.kcal))} kcal) für ${u.display_name} am ${day} eingetragen.`
+      return `✓ ${pct < 100 ? `${pct} % von ` : ''}Mahlzeit "${m.name}" (${kcal} kcal) für ${u.display_name} am ${day} eingetragen.`
     }
 
     case 'log_weight': {
@@ -501,8 +511,8 @@ Deno.serve(async (req) => {
         return respond(rpcResult(id, {
           protocolVersion: (params.protocolVersion as string) || '2025-06-18',
           capabilities: { tools: {} },
-          serverInfo: { name: 'fitness-app', title: 'Fitness-App (David & Svenja)', version: '1.0.0' },
-          instructions: 'Steuert die Fitness-App von David & Svenja: Trainingsplan anpassen (Übungen tauschen/ändern/hinzufügen), Kalorien & Zutaten loggen, Mahlzeiten, Gewicht. Jedes Tool braucht user="david" oder "svenja" – im Zweifel nachfragen. Bei Zutaten (log_ingredients) Kalorien/Makros selbst recherchieren und mitgeben.'
+          serverInfo: { name: 'fitness-app', title: 'Fitness-App (David & Svenja)', version: '1.1.0' },
+          instructions: 'Steuert die Fitness-App von David & Svenja: Trainingsplan anpassen (Übungen tauschen/ändern/hinzufügen), Kalorien & Zutaten loggen, Mahlzeiten (auch anteilig, z. B. portion 0.25), Gewicht. Jedes Tool braucht user="david" oder "svenja" – im Zweifel nachfragen. Bei Zutaten (log_ingredients) Kalorien/Makros selbst recherchieren und mitgeben.'
         }))
       case 'ping':
         return respond(rpcResult(id, {}))

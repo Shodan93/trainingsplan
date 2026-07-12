@@ -341,6 +341,11 @@ export async function addMeal(meal: Partial<Meal>): Promise<Meal> {
 export async function deleteMeal(id: string) {
   await supabase.from('meals').delete().eq('id', id)
 }
+// Auch Partner-Mahlzeiten lesbar (RLS erlaubt select für beide) – für geteilte Links
+export async function getMealById(id: string): Promise<Meal | null> {
+  const { data } = await supabase.from('meals').select('*').eq('id', id).maybeSingle()
+  return (data as Meal) ?? null
+}
 
 // Echte Trainingslast für die Kalorienrechnung: Ø Dauer & Ø Volumen aus den
 // letzten 28 Tagen plus geplante Frequenz aus dem aktiven Plan (Anzahl Plan-Tage)
