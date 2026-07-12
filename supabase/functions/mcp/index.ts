@@ -228,6 +228,31 @@ const TOOLS = [
     }
   },
   {
+    name: 'save_meal',
+    description: 'Mahlzeit NUR speichern (ohne Kalorien-Eintrag) – z. B. ein Mealie-Rezept übernehmen. Zutaten mit recherchierten/geschätzten kcal & Makros mitgeben; Summen werden berechnet. Später über log_saved_meal (auch anteilig) eintragbar.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user: USER,
+        name: { type: 'string', description: 'Name der Mahlzeit, z. B. "Kokos-Curry-Hähnchen (4 Portionen)"' },
+        ingredients: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              kcal: { type: 'number' },
+              protein_g: { type: 'number' }, carbs_g: { type: 'number' }, fat_g: { type: 'number' },
+              amount_g: { type: 'number' }
+            },
+            required: ['name', 'kcal']
+          }
+        }
+      },
+      required: ['user', 'name', 'ingredients']
+    }
+  },
+  {
     name: 'get_calories',
     description: 'Kalorien-Einträge eines Tages mit Summe, Makros und Ziel anzeigen.',
     inputSchema: { type: 'object', properties: { user: USER, day: DAY }, required: ['user'] }
@@ -403,6 +428,27 @@ async function callTool(name: string, args: Json): Promise<string> {
       return `✓ "${label}" mit ${tot.kcal} kcal (P ${tot.p} · KH ${tot.c} · F ${tot.f} g) für ${u.display_name} am ${day} eingetragen.${mealNote}`
     }
 
+    case 'save_meal': {
+      const ing = (args.ingredients as Json[] | undefined) ?? []
+      if (!ing.length) throw new Error('Keine Zutaten angegeben.')
+      if (!String(args.name ?? '').trim()) throw new Error('Name fehlt.')
+      const items = ing.map(i => ({
+        name: String(i.name), amount_g: num(i.amount_g),
+        kcal: Math.round(Number(i.kcal)),
+        protein_g: num(i.protein_g), carbs_g: num(i.carbs_g), fat_g: num(i.fat_g)
+      }))
+      const kcal = Math.round(sum(items.map(i => i.kcal)))
+      const { error } = await admin.from('meals').insert({
+        user_id: u.id, name: String(args.name).trim(), kcal,
+        protein_g: Math.round(sum(items.map(i => i.protein_g)) * 10) / 10 || null,
+        carbs_g: Math.round(sum(items.map(i => i.carbs_g)) * 10) / 10 || null,
+        fat_g: Math.round(sum(items.map(i => i.fat_g)) * 10) / 10 || null,
+        items
+      })
+      if (error) throw new Error(error.message)
+      return `✓ Mahlzeit "${args.name}" (${kcal} kcal, ${items.length} Zutaten) für ${u.display_name} gespeichert – noch NICHT geloggt. Eintragen per log_saved_meal, auch anteilig (portion 0.25 = 1 von 4 Portionen).`
+    }
+
     case 'get_calories': {
       const day = resolveDay(args.day as string | undefined)
       const [{ data: cl }, target] = await Promise.all([
@@ -511,8 +557,8 @@ Deno.serve(async (req) => {
         return respond(rpcResult(id, {
           protocolVersion: (params.protocolVersion as string) || '2025-06-18',
           capabilities: { tools: {} },
-          serverInfo: { name: 'fitness-app', title: 'Fitness-App (David & Svenja)', version: '1.1.0' },
-          instructions: 'Steuert die Fitness-App von David & Svenja: Trainingsplan anpassen (Übungen tauschen/ändern/hinzufügen), Kalorien & Zutaten loggen, Mahlzeiten (auch anteilig, z. B. portion 0.25), Gewicht. Jedes Tool braucht user="david" oder "svenja" – im Zweifel nachfragen. Bei Zutaten (log_ingredients) Kalorien/Makros selbst recherchieren und mitgeben.'
+          serverInfo: { name: 'fitness-app', title: 'Fitness-App (David & Svenja)', version: '1.2.0' },
+          instructions: 'Steuert die Fitness-App von David & Svenja: Trainingsplan anpassen (Übungen tauschen/ändern/hinzufügen), Kalorien & Zutaten loggen, Mahlzeiten (auch anteilig, z. B. portion 0.25), Gewicht. Jedes Tool braucht user="david" oder "svenja" – im Zweifel nachfragen. Bei Zutaten Kalorien/Makros selbst recherchieren und mitgeben. Mealie-Rezepte: Zutaten+Nährwerte aus Mealie holen, dann save_meal (nur speichern) oder log_ingredients (gleich loggen).'
         }))
       case 'ping':
         return respond(rpcResult(id, {}))
