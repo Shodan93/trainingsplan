@@ -21,6 +21,29 @@ export async function tipOfTheDay(): Promise<MotivationTip | null> {
   return (data ?? null) as MotivationTip | null
 }
 
+// ---- Trainingspartner (verknüpft per Freundes-Code) ----
+export async function getPartners(uid: string): Promise<Profile[]> {
+  const { data: ps } = await supabase.from('partnerships').select('a,b')
+  const ids = (ps ?? []).map(p => (p.a === uid ? p.b : p.a)).filter(id => id !== uid)
+  if (!ids.length) return []
+  const { data } = await supabase.from('profiles').select('*').in('id', ids)
+  return (data ?? []) as Profile[]
+}
+export async function addPartnerByCode(uid: string, code: string): Promise<Profile> {
+  const { data } = await supabase.from('profiles').select('*')
+    .eq('friend_code', code.trim().toUpperCase()).maybeSingle()
+  if (!data) throw new Error('Code nicht gefunden – bitte prüfen.')
+  if (data.id === uid) throw new Error('Das ist dein eigener Code 🙂')
+  const [a, b] = [uid, data.id].sort()
+  const { error } = await supabase.from('partnerships').insert({ a, b })
+  if (error && !error.message.toLowerCase().includes('duplicate')) throw new Error(error.message)
+  return data as Profile
+}
+export async function removePartner(uid: string, partnerId: string) {
+  const [a, b] = [uid, partnerId].sort()
+  await supabase.from('partnerships').delete().eq('a', a).eq('b', b)
+}
+
 export async function getProfiles(): Promise<Profile[]> {
   const { data } = await supabase.from('profiles').select('*').order('display_name')
   return (data ?? []) as Profile[]

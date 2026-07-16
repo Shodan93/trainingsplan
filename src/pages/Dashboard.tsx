@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getStats, getActivePlan, getDays, tipOfTheDay, getWeeklyTarget, ensureWeeklyTarget,
-  getProfiles, getOpenSession, deleteSession, countCompletedSessionsInWeek, getDeloadInfo, startSession
+  getPartners, getOpenSession, deleteSession, countCompletedSessionsInWeek, getDeloadInfo, startSession
 } from '../lib/db'
 import { UserStats, Profile } from '../lib/types'
 import { greeting, isoWeekStart, cls, fmtDateTime } from '../lib/utils'
@@ -28,8 +28,8 @@ export default function Dashboard() {
     queryFn: async () => {
       const uid = profile!.id
       const ws = isoWeekStart()
-      const [stats, plan, tip, allProfiles, openSession, deload] = await Promise.all([
-        getStats(uid), getActivePlan(uid), tipOfTheDay(), getProfiles(), getOpenSession(uid), getDeloadInfo(uid)
+      const [stats, plan, tip, partnerList, openSession, deload] = await Promise.all([
+        getStats(uid), getActivePlan(uid), tipOfTheDay(), getPartners(uid), getOpenSession(uid), getDeloadInfo(uid)
       ])
       const days = plan ? await getDays(plan.id) : []
       // Standard-Wochenziel = Anzahl der Plan-Tage (im Profil weiter anpassbar)
@@ -37,7 +37,7 @@ export default function Dashboard() {
       const [week, weekDone] = await Promise.all([getWeeklyTarget(uid, ws), countCompletedSessionsInWeek(uid, ws)])
       const anchor = deload.lastDeload ?? deload.firstSession
       const deloadDue = !!anchor && (Date.now() - new Date(anchor).getTime()) > 42 * 86400000
-      return { stats, plan, days, tip, partners: allProfiles.filter(p => p.id !== uid), openSession, week, weekDone, deloadDue }
+      return { stats, plan, days, tip, partners: partnerList, openSession, week, weekDone, deloadDue }
     }
   })
 

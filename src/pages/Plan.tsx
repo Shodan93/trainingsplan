@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
-  getProfiles, getActivePlan, getDays, getDayExercises, createEmptyPlan,
+  getPartners, getActivePlan, getDays, getDayExercises, createEmptyPlan,
   updatePlan, updateExercise, addExercise, deleteExercise, addDay, updateDay, deleteDay, reorderExercises
 } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
@@ -55,8 +55,9 @@ export default function PlanPage() {
 
   useEffect(() => {
     if (!profile) return
-    getProfiles().then(ps => {
-      setPeople(ps)
+    // Nur ich + verknüpfte Trainingspartner (Freundes-Code im Profil)
+    getPartners(profile.id).then(ps => {
+      setPeople([profile, ...ps])
       setViewId(profile.id)
     })
   }, [profile])

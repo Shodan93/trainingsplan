@@ -3,6 +3,7 @@ export type Profile = {
   display_name: string
   avatar_emoji: string
   is_admin: boolean
+  friend_code: string | null
 }
 
 export type Settings = {

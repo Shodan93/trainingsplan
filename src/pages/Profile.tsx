@@ -5,7 +5,8 @@ import {
   getSettings, updateSettings, getStats, getBadges, getUserBadges,
   getGoals, upsertGoal, deleteGoal,
   getWeeklyTarget, setWeeklyTargetCount, ensureWeeklyTarget,
-  getSessions, updateSession
+  getSessions, updateSession,
+  getPartners, addPartnerByCode, removePartner
 } from '../lib/db'
 import {
   Settings, UserStats, Badge, UserBadge, Goal, WorkoutSession
@@ -102,6 +103,7 @@ export default function Profile() {
       {tab === 'Einstellungen' && settings && (
         <>
         <AccountCard email={session?.user?.email ?? ''} onPassword={updatePassword} />
+        <PartnersCard uid={profile.id} myCode={profile.friend_code} />
         <SettingsTab uid={profile.id} settings={settings} weekTarget={weekTarget}
           onWeek={async (n) => { await setWeeklyTargetCount(profile.id, isoWeekStart(), n); setWeekTarget(n) }}
           onChange={(s) => setSettings(s)} displayName={profile.display_name}
@@ -326,6 +328,43 @@ function AccountCard({ email, onPassword }: { email: string; onPassword: (pw: st
         </div>
         {msg && <p className={cls('text-xs mt-1.5', msg.startsWith('✓') ? 'text-success' : 'text-danger')}>{msg}</p>}
       </div>
+    </div>
+  )
+}
+
+// Trainingspartner: verknüpfen per Freundes-Code – nur Partner sehen
+// gegenseitig Plan, Streak & Dashboard-Karte
+function PartnersCard({ uid, myCode }: { uid: string; myCode: string | null }) {
+  const [partners, setPartners] = useState<{ id: string; display_name: string; avatar_emoji: string }[]>([])
+  const [code, setCode] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const load = () => getPartners(uid).then(setPartners)
+  useEffect(() => { load() }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="card space-y-3 mb-3">
+      <p className="font-semibold text-sm">Trainingspartner</p>
+      <p className="text-xs text-white/45">
+        Dein Freundes-Code: <button className="font-mono font-bold text-primary"
+          onClick={async () => { if (myCode) { await navigator.clipboard.writeText(myCode); setMsg('✓ Code kopiert') } }}>{myCode ?? '–'}</button>
+        {' '}· teile ihn, damit euch gegenseitig Plan & Streak angezeigt werden.
+      </p>
+      {partners.map(p => (
+        <div key={p.id} className="flex items-center justify-between">
+          <span className="text-sm">{p.avatar_emoji} {p.display_name}</span>
+          <button className="text-white/30 text-sm" onClick={async () => {
+            if (confirm(`Verknüpfung mit ${p.display_name} lösen?`)) { await removePartner(uid, p.id); load() }
+          }}>✕</button>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <input className="input !py-2 font-mono uppercase" value={code} placeholder="Code eingeben"
+          onChange={e => { setCode(e.target.value); setMsg(null) }} maxLength={6} />
+        <button className="btn-primary shrink-0" disabled={code.trim().length < 6} onClick={async () => {
+          try { const p = await addPartnerByCode(uid, code); setMsg(`✓ Mit ${p.display_name} verknüpft`); setCode(''); load() }
+          catch (e) { setMsg((e as Error).message) }
+        }}>Verknüpfen</button>
+      </div>
+      {msg && <p className={cls('text-xs', msg.startsWith('✓') ? 'text-success' : 'text-danger')}>{msg}</p>}
     </div>
   )
 }
