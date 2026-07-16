@@ -20,7 +20,7 @@ const TABS = ['Übersicht', 'Ziele', 'Tagebuch', 'Einstellungen'] as const
 type Tab = typeof TABS[number]
 
 export default function Profile() {
-  const { profile, signOut, refreshProfile } = useAuth()
+  const { profile, signOut, refreshProfile, session, updatePassword } = useAuth()
   const [tab, setTab] = useState<Tab>('Übersicht')
   const [stats, setStats] = useState<UserStats | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -100,10 +100,13 @@ export default function Profile() {
       {tab === 'Ziele' && <GoalsTab uid={profile.id} />}
       {tab === 'Tagebuch' && <DiaryTab uid={profile.id} />}
       {tab === 'Einstellungen' && settings && (
+        <>
+        <AccountCard email={session?.user?.email ?? ''} onPassword={updatePassword} />
         <SettingsTab uid={profile.id} settings={settings} weekTarget={weekTarget}
           onWeek={async (n) => { await setWeeklyTargetCount(profile.id, isoWeekStart(), n); setWeekTarget(n) }}
           onChange={(s) => setSettings(s)} displayName={profile.display_name}
           onName={async (name) => { await supabase.from('profiles').update({ display_name: name }).eq('id', profile.id); refreshProfile() }} />
+        </>
       )}
 
       {/* Daumen-Zone: Tabs unten über der Navigation */}
@@ -295,6 +298,33 @@ function SettingsTab({ uid, settings, onChange, weekTarget, onWeek, displayName,
               className={cls('btn flex-1', settings.units === u ? 'btn-primary' : 'btn-ghost')}>{u}</button>
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function AccountCard({ email, onPassword }: { email: string; onPassword: (pw: string) => Promise<{ error: string | null }> }) {
+  const [pw, setPw] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="card space-y-3 mb-3">
+      <p className="font-semibold text-sm">Account</p>
+      <p className="text-sm text-white/60">Angemeldet als <span className="text-white/90">{email}</span></p>
+      <div>
+        <label className="label">Neues Passwort</label>
+        <div className="flex gap-2">
+          <input className="input" type="password" autoComplete="new-password" value={pw}
+            onChange={e => { setPw(e.target.value); setMsg(null) }} placeholder="mind. 8 Zeichen" />
+          <button className="btn-primary shrink-0" disabled={busy || pw.length < 8} onClick={async () => {
+            setBusy(true)
+            const { error } = await onPassword(pw)
+            setMsg(error ? `Fehler: ${error}` : '✓ Passwort geändert')
+            if (!error) setPw('')
+            setBusy(false)
+          }}>Ändern</button>
+        </div>
+        {msg && <p className={cls('text-xs mt-1.5', msg.startsWith('✓') ? 'text-success' : 'text-danger')}>{msg}</p>}
       </div>
     </div>
   )

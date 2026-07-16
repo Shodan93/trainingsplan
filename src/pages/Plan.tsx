@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
-  getProfiles, getActivePlan, getDays, getDayExercises,
+  getProfiles, getActivePlan, getDays, getDayExercises, createEmptyPlan,
   updatePlan, updateExercise, addExercise, deleteExercise, addDay, updateDay, deleteDay, reorderExercises
 } from '../lib/db'
 import { Plan, PlanDay, PlanExercise, Profile, MUSCLE_LABELS, MUSCLE_HEX } from '../lib/types'
@@ -117,7 +117,18 @@ export default function PlanPage() {
       )}
 
       {!plan ? (
-        <EmptyState icon="📋" title="Noch kein Plan" hint={isOwn ? 'Lege unten einen Tag an, um zu starten.' : ''} />
+        <div className="space-y-3">
+          <EmptyState icon="📋" title="Noch kein Plan"
+            hint={isOwn ? 'Erstelle deinen Plan – danach fügst du Trainingstage und Übungen hinzu.' : 'Hier wurde noch kein Plan angelegt.'} />
+          {isOwn && (
+            <button className="btn-primary w-full !py-3" onClick={async () => {
+              if (!profile) return
+              await createEmptyPlan(profile.id)
+              await load(profile.id)
+              setEdit(true)
+            }}>+ Plan erstellen</button>
+          )}
+        </div>
       ) : (
         <>
           {/* Plan-Info (Name dezent – Trainings werden über Tag + Hauptübung benannt) */}

@@ -8,6 +8,9 @@ type AuthCtx = {
   profile: Profile | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signUp: (email: string, password: string, name: string) => Promise<{ error: string | null; needsConfirm: boolean }>
+  resetPassword: (email: string) => Promise<{ error: string | null }>
+  updatePassword: (password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
 }
@@ -19,27 +22,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
 
-  async function loadProfile(uid: string) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', uid).single()
-    setProfile(data as Profile | null)
-  }
-
+  // WICHTIG: Im onAuthStateChange-Callback NIEMALS Supabase-Queries awaiten –
+  // der Client hält dabei einen internen Lock und die Query wartet ewig
+  // darauf (Deadlock; genau das war der "Initial-Load hängt"-Bug).
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
+    let mounted = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return
       setSession(data.session)
-      if (data.session) await loadProfile(data.session.user.id)
       setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       setSession(s)
-      if (s) await loadProfile(s.user.id)
-      else setProfile(null)
+      setLoading(false)
     })
-    return () => sub.subscription.unsubscribe()
+    return () => { mounted = false; sub.subscription.unsubscribe() }
   }, [])
+
+  // Profil separat vom Auth-Callback laden. Kleiner Retry, weil der
+  // handle_new_user-Trigger direkt nach der Registrierung noch schreiben kann.
+  const uid = session?.user?.id ?? null
+  useEffect(() => {
+    if (!uid) { setProfile(null); return }
+    let cancelled = false
+    const load = async (attempt = 0) => {
+      const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
+      if (cancelled) return
+      if (data) setProfile(data as Profile)
+      else if (attempt < 4) setTimeout(() => load(attempt + 1), 700)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [uid])
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    return { error: error ? error.message : null }
+  }
+
+  const signUp = async (email: string, password: string, name: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(), password,
+      options: { data: { display_name: name.trim() || email.trim().split('@')[0] } }
+    })
+    if (error) return { error: error.message, needsConfirm: false }
+    // Ohne Session heißt: E-Mail-Bestätigung ist aktiv
+    return { error: null, needsConfirm: !data.session }
+  }
+
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${location.origin}/reset`
+    })
+    return { error: error ? error.message : null }
+  }
+
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password })
     return { error: error ? error.message : null }
   }
 
@@ -49,11 +88,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const refreshProfile = async () => {
-    if (session) await loadProfile(session.user.id)
+    if (!uid) return
+    const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
+    if (data) setProfile(data as Profile)
   }
 
   return (
-    <Ctx.Provider value={{ session, profile, loading, signIn, signOut, refreshProfile }}>
+    <Ctx.Provider value={{ session, profile, loading, signIn, signUp, resetPassword, updatePassword, signOut, refreshProfile }}>
       {children}
     </Ctx.Provider>
   )

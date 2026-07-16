@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: 'Fitness',
         short_name: 'Fitness',
-        description: 'Fitness-App für David & Svenja – Training, Gewicht & Kalorien',
+        description: 'Fitness-App – Training, Gewicht & Kalorien',
         theme_color: '#0ea5e9',
         background_color: '#0b1020',
         display: 'standalone',

@@ -83,6 +83,15 @@ export async function getDayExercises(dayIds: string[]): Promise<PlanExercise[]>
 }
 
 // ---- Plan editing ----
+// Leeren Plan anlegen (neue Nutzer) – wird direkt aktiv
+export async function createEmptyPlan(uid: string, name = 'Mein Plan'): Promise<Plan> {
+  await supabase.from('plans').update({ is_active: false }).eq('owner_id', uid)
+  const { data, error } = await supabase.from('plans')
+    .insert({ owner_id: uid, name, is_active: true }).select().single()
+  if (error) throw error
+  return data as Plan
+}
+
 export async function updatePlan(id: string, patch: Partial<Plan>) {
   await supabase.from('plans').update(patch).eq('id', id)
 }
