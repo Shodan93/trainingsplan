@@ -5,7 +5,7 @@ import { cls } from '../lib/utils'
 import { IconTrain, IconScale, IconFood, IconUser } from './icons'
 
 // 4 Daumen-Tabs: Gym · Gewicht · Kalorien · Profil
-const GYM_PATHS = ['/', '/plan', '/workout', '/verlauf', '/stats']
+const GYM_PATHS = ['/', '/plan', '/workout', '/ausdauer', '/verlauf', '/stats']
 const TABS = [
   { to: '/', label: 'Gym', Icon: IconTrain, isActive: (p: string) => GYM_PATHS.includes(p) || p.startsWith('/workout') },
   { to: '/gewicht', label: 'Gewicht', Icon: IconScale, isActive: (p: string) => p.startsWith('/gewicht') },
@@ -13,10 +13,11 @@ const TABS = [
   { to: '/profile', label: 'Profil', Icon: IconUser, isActive: (p: string) => p.startsWith('/profile') }
 ]
 
-// Segmente innerhalb des Gym-Bereichs
+// Segmente innerhalb des Gym-Bereichs: Plan/Start = Kraft, Ausdauer = Cardio
 const GYM_SEGMENTS = [
   { to: '/', label: 'Start' },
   { to: '/plan', label: 'Plan' },
+  { to: '/ausdauer', label: 'Ausdauer' },
   { to: '/verlauf', label: 'Verlauf' },
   { to: '/stats', label: 'Statistik' }
 ]

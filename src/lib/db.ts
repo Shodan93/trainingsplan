@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import {
   Plan, PlanDay, PlanExercise, WorkoutSession, SetLog, Goal,
   BodyMeasurement, DiaryEntry, WeeklyTarget, UserStats, Badge, UserBadge,
-  MotivationTip, Profile, Settings, WeightLog, CalorieLog, Meal
+  MotivationTip, Profile, Settings, WeightLog, CalorieLog, Meal, CardioSession
 } from './types'
 
 export type WorkoutBootstrap = {
@@ -255,6 +255,50 @@ export async function lastSetsForExercise(planExerciseId: string): Promise<SetLo
     .eq('session_id', sid).eq('plan_exercise_id', planExerciseId)
     .order('set_number')
   return (data ?? []) as SetLog[]
+}
+
+// ---- Ausdauer (Cardio pro Gerät) ----
+export async function getCardioSessions(uid: string, limit = 500): Promise<CardioSession[]> {
+  const { data } = await supabase.from('cardio_sessions').select('*')
+    .eq('user_id', uid).order('performed_at', { ascending: false }).limit(limit)
+  return (data ?? []) as CardioSession[]
+}
+export async function addCardioSession(s: Partial<CardioSession>): Promise<CardioSession> {
+  const { data, error } = await supabase.from('cardio_sessions').insert(s).select().single()
+  if (error) throw error
+  return data as CardioSession
+}
+export async function updateCardioSession(id: string, patch: Partial<CardioSession>) {
+  const { error } = await supabase.from('cardio_sessions').update(patch).eq('id', id)
+  if (error) throw error
+}
+export async function deleteCardioSession(id: string) {
+  await supabase.from('cardio_sessions').delete().eq('id', id)
+}
+
+// Display-Foto → strukturierte Werte (Edge Function mit Claude Vision)
+export type CardioOcrResult = {
+  type: 'values'
+  machine_guess?: string
+  duration_seconds?: number
+  calories?: number
+  distance_km?: number
+  floors?: number
+  level?: number
+  avg_watts?: number
+  avg_hr?: number
+  cadence?: number
+  speed_kmh?: number
+  incline_pct?: number
+  note?: string
+}
+export async function cardioOcr(imageBase64: string, mediaType: string): Promise<CardioOcrResult> {
+  const { data, error } = await supabase.functions.invoke('cardio-ocr', {
+    body: { image: imageBase64, media_type: mediaType }
+  })
+  if (error) throw new Error('Scan fehlgeschlagen – bitte erneut versuchen oder manuell eintragen.')
+  if (data?.error) throw new Error(String(data.error))
+  return data as CardioOcrResult
 }
 
 // ---- Stats helpers ----

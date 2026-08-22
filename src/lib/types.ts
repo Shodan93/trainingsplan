@@ -154,6 +154,58 @@ export type SetLog = {
   rest_seconds: number | null
 }
 
+export type CardioSession = {
+  id: string
+  user_id: string
+  machine: string
+  performed_at: string
+  duration_seconds: number
+  calories: number | null
+  distance_km: number | null
+  floors: number | null
+  level: number | null
+  avg_watts: number | null
+  avg_hr: number | null
+  max_hr: number | null
+  cadence: number | null
+  speed_kmh: number | null
+  incline_pct: number | null
+  rpe: number | null
+  notes: string | null
+  source: 'manual' | 'ocr'
+  created_at: string
+}
+
+// Messwerte eines Cardio-Eintrags (ohne Pflichtfeld Dauer)
+export type CardioMetricKey =
+  | 'calories' | 'distance_km' | 'floors' | 'level' | 'avg_watts'
+  | 'avg_hr' | 'max_hr' | 'cadence' | 'speed_kmh' | 'incline_pct'
+
+export const CARDIO_METRICS: Record<CardioMetricKey, { label: string; unit: string }> = {
+  floors: { label: 'Etagen', unit: 'floors' },
+  level: { label: 'Level', unit: '' },
+  avg_watts: { label: 'Leistung', unit: 'W' },
+  distance_km: { label: 'Distanz', unit: 'km' },
+  speed_kmh: { label: 'Tempo', unit: 'km/h' },
+  incline_pct: { label: 'Steigung', unit: '%' },
+  cadence: { label: 'Kadenz', unit: 'spm' },
+  calories: { label: 'Kalorien', unit: 'kcal' },
+  avg_hr: { label: 'Ø Puls', unit: 'bpm' },
+  max_hr: { label: 'Max. Puls', unit: 'bpm' }
+}
+
+// Geräte-Vorlagen: welche Felder sind pro Gerät sinnvoll, was ist die
+// Leit-Metrik für die Progression (nach Dauer)
+export const CARDIO_MACHINES: { name: string; icon: string; fields: CardioMetricKey[]; primary: CardioMetricKey }[] = [
+  { name: 'Treppensteiger', icon: '🪜', fields: ['floors', 'level', 'cadence', 'avg_watts', 'calories', 'avg_hr'], primary: 'floors' },
+  { name: 'Laufband', icon: '🏃', fields: ['distance_km', 'speed_kmh', 'incline_pct', 'calories', 'avg_hr'], primary: 'distance_km' },
+  { name: 'Ergometer', icon: '🚴', fields: ['avg_watts', 'level', 'distance_km', 'cadence', 'calories', 'avg_hr'], primary: 'avg_watts' },
+  { name: 'Rudergerät', icon: '🚣', fields: ['distance_km', 'avg_watts', 'cadence', 'calories', 'avg_hr'], primary: 'distance_km' },
+  { name: 'Crosstrainer', icon: '⛷️', fields: ['level', 'avg_watts', 'distance_km', 'calories', 'avg_hr'], primary: 'avg_watts' }
+]
+export const cardioMachineInfo = (machine: string) =>
+  CARDIO_MACHINES.find(m => m.name.toLowerCase() === machine.trim().toLowerCase()) ?? null
+
 export type Goal = {
   id: string
   user_id: string

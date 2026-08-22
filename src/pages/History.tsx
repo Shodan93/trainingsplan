@@ -3,30 +3,38 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import {
   getSessions, setLogsForSessions, deleteSession,
-  getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume, recomputeStats
+  getSessionLogs, updateSetLogById, deleteSetLog, updateSession, recomputeSessionVolume, recomputeStats,
+  getCardioSessions
 } from '../lib/db'
-import { WorkoutSession, SetLog } from '../lib/types'
+import { WorkoutSession, SetLog, CardioSession } from '../lib/types'
 import { Spinner, PageSkeleton, EmptyState, Modal } from '../components/ui'
+import CardioForm, { CardioEntryRow } from '../components/CardioForm'
 import { fmtDate, fmtDuration, parseNum, MOODS, moodEmoji, cls } from '../lib/utils'
 
 export default function History() {
   const { profile } = useAuth()
   const qc = useQueryClient()
   const [editSession, setEditSession] = useState<WorkoutSession | null>(null)
+  const [mode, setMode] = useState<'kraft' | 'ausdauer'>('kraft')
+  const [editCardio, setEditCardio] = useState<CardioSession | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['history', profile?.id],
     enabled: !!profile,
     queryFn: async () => {
-      const ss = await getSessions(profile!.id, 300)
+      const [ss, cardio] = await Promise.all([
+        getSessions(profile!.id, 300),
+        getCardioSessions(profile!.id, 300)
+      ])
       const logs = await setLogsForSessions(ss.map(s => s.id))
       const c: Record<string, number> = {}
       logs.forEach(l => { c[l.session_id] = (c[l.session_id] ?? 0) + 1 })
-      return { sessions: ss, counts: c }
+      return { sessions: ss, counts: c, cardio }
     }
   })
   const sessions = data?.sessions ?? []
   const counts = data?.counts ?? {}
+  const cardio = data?.cardio ?? []
   const refresh = () => qc.invalidateQueries({ queryKey: ['history'] })
 
   if (isLoading) return <PageSkeleton rows={5} />
@@ -34,7 +42,29 @@ export default function History() {
   return (
     <div className="space-y-4 py-2">
       <h1 className="text-2xl font-bold pt-2">Trainingsverlauf</h1>
-      {!sessions.length ? (
+
+      {/* Kraft- und Ausdauer-Einheiten getrennt anzeigen */}
+      <div className="flex gap-1 bg-white/5 rounded-2xl p-1">
+        {([['kraft', '🏋️ Kraft'], ['ausdauer', '🏃 Ausdauer']] as const).map(([m, label]) => (
+          <button key={m} onClick={() => setMode(m)}
+            className={cls('flex-1 !py-2 text-sm', mode === m ? 'btn-primary' : 'btn-ghost')}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'ausdauer' ? (
+        !cardio.length ? (
+          <EmptyState icon="🏃" title="Noch keine Ausdauer-Einheiten"
+            hint="Trage Cardio im Bereich „Ausdauer“ ein – manuell oder per Foto vom Gerätedisplay." />
+        ) : (
+          <div className="space-y-2">
+            {cardio.map(s => (
+              <CardioEntryRow key={s.id} s={s} onClick={() => setEditCardio(s)} />
+            ))}
+          </div>
+        )
+      ) : !sessions.length ? (
         <EmptyState icon="📭" title="Noch keine Trainings" hint="Deine abgeschlossenen Trainings erscheinen hier – mit Übungen und Notiz." />
       ) : (
         <div className="space-y-2">
@@ -58,6 +88,11 @@ export default function History() {
       {editSession && (
         <SessionEditor session={editSession} onClose={() => setEditSession(null)}
           onChanged={() => { setEditSession(null); refresh(); qc.invalidateQueries({ queryKey: ['stats'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }) }} />
+      )}
+      {editCardio && profile && (
+        <CardioForm uid={profile.id} existing={editCardio}
+          onClose={() => setEditCardio(null)}
+          onSaved={() => { setEditCardio(null); refresh(); qc.invalidateQueries({ queryKey: ['cardio'] }) }} />
       )}
     </div>
   )

@@ -67,6 +67,12 @@ export default function WorkoutPicker() {
     <div className="space-y-4 py-2">
       <h1 className="text-2xl font-bold pt-2">Training starten</h1>
 
+      {/* Kraft und Ausdauer sind getrennt: hier Kraft (Plan-Tage), Cardio auf eigener Seite */}
+      <div className="flex gap-1 bg-white/5 rounded-2xl p-1">
+        <button className="btn-primary flex-1 !py-2 text-sm">🏋️ Kraft</button>
+        <button className="btn-ghost flex-1 !py-2 text-sm" onClick={() => nav('/ausdauer')}>🏃 Ausdauer</button>
+      </div>
+
       {!plan ? (
         <EmptyState icon="📋" title="Kein aktiver Plan" hint={'Lege zuerst im Tab „Plan“ einen Plan an.'} />
       ) : (
