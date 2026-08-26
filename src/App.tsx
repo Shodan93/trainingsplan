@@ -16,6 +16,7 @@ import { ReactNode, lazy, Suspense } from 'react'
 
 const Stats = lazy(() => import('./pages/Stats'))
 const Cardio = lazy(() => import('./pages/Cardio'))
+const LiveHr = lazy(() => import('./pages/LiveHr'))
 const PlanPage = lazy(() => import('./pages/Plan'))
 const Weight = lazy(() => import('./pages/Weight'))
 const Calories = lazy(() => import('./pages/Calories'))
@@ -58,6 +59,7 @@ export default function App() {
       <Route path="/workout" element={<Protected><WorkoutPicker /></Protected>} />
       <Route path="/workout/run/:sessionId" element={<Protected><WorkoutRun /></Protected>} />
       <Route path="/ausdauer" element={<Protected>{lazyPage(<Cardio />)}</Protected>} />
+      <Route path="/ausdauer/live" element={<Protected>{lazyPage(<LiveHr />)}</Protected>} />
       <Route path="/verlauf" element={<Protected><History /></Protected>} />
       <Route path="/stats" element={<Protected>{lazyPage(<Stats />)}</Protected>} />
       <Route path="/gewicht" element={<Protected>{lazyPage(<Weight />)}</Protected>} />

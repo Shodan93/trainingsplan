@@ -74,6 +74,23 @@ const emptyDraft = (): Draft => ({
   rpe: null, notes: '', source: 'manual', metrics: {}
 })
 
+// Vorbefüllung z. B. aus dem Live-Puls-Monitor (Dauer, Ø/Max-Puls …)
+function draftFromInitial(init: Partial<CardioSession>): Draft {
+  const d = emptyDraft()
+  if (init.machine) d.machine = init.machine
+  if (init.performed_at) d.performedAt = toLocalInput(new Date(init.performed_at))
+  if (init.duration_seconds && init.duration_seconds > 0) {
+    d.minutes = String(Math.floor(init.duration_seconds / 60))
+    d.seconds = String(init.duration_seconds % 60)
+  }
+  if (init.notes) d.notes = init.notes
+  if (init.rpe != null) d.rpe = init.rpe
+  ;(Object.keys(CARDIO_METRICS) as CardioMetricKey[]).forEach(k => {
+    if (init[k] != null) d.metrics[k] = String(init[k])
+  })
+  return d
+}
+
 function draftFromSession(s: CardioSession): Draft {
   const metrics: Partial<Record<CardioMetricKey, string>> = {}
   ;(Object.keys(CARDIO_METRICS) as CardioMetricKey[]).forEach(k => {
@@ -106,14 +123,16 @@ function applyOcr(d: Draft, r: CardioOcrResult): Draft {
 // Erfassung/Bearbeitung eines Ausdauer-Eintrags: manuell oder per Display-Foto.
 // Pflicht: Gerät + Dauer. Restliche Felder je nach Gerät, damit die
 // Progression pro Gerät vergleichbar bleibt (Level/Watt/Etagen/Distanz …).
-export default function CardioForm({ uid, existing, knownMachines, onClose, onSaved }: {
+export default function CardioForm({ uid, existing, initial, knownMachines, onClose, onSaved }: {
   uid: string
   existing?: CardioSession | null
+  initial?: Partial<CardioSession>
   knownMachines?: string[]
   onClose: () => void
   onSaved: () => void
 }) {
-  const [draft, setDraft] = useState<Draft>(() => existing ? draftFromSession(existing) : emptyDraft())
+  const [draft, setDraft] = useState<Draft>(() =>
+    existing ? draftFromSession(existing) : initial ? draftFromInitial(initial) : emptyDraft())
   const [busy, setBusy] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)

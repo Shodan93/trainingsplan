@@ -45,8 +45,8 @@ export function SegmentRow({ children }: { children: ReactNode }) {
 export default function Layout({ children }: { children: ReactNode }) {
   const { profile } = useAuth()
   const loc = useLocation()
-  // Workout-Modus läuft fokussiert ohne Navigation drumherum
-  const fullscreen = loc.pathname.startsWith('/workout/run')
+  // Workout-Modus & Live-Puls laufen fokussiert ohne Navigation drumherum
+  const fullscreen = loc.pathname.startsWith('/workout/run') || loc.pathname === '/ausdauer/live'
 
   if (fullscreen) return <>{children}</>
 

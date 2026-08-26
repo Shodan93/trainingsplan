@@ -81,6 +81,16 @@ export default function Cardio() {
 
       <p className="text-sm text-white/50">Cardio pro Gerät tracken – manuell oder per Foto vom Display.</p>
 
+      {/* Live-Monitoring mit BLE-Pulssensor (z. B. Coospo HW6) */}
+      <button onClick={() => nav('/ausdauer/live')}
+        className="card w-full text-left border-accent/40 bg-accent/10 flex items-center justify-between active:scale-[0.99]">
+        <div>
+          <p className="font-semibold text-accent">🫀 Live-Puls mit Zielzone</p>
+          <p className="text-xs text-white/55 mt-0.5">HW6 verbinden · Ton-Feedback, wenn du die Zone verlässt</p>
+        </div>
+        <span className="text-xl text-white/40">›</span>
+      </button>
+
       {!all.length ? (
         <EmptyState icon="🏃" title="Noch keine Ausdauer-Einheiten"
           hint="Trage deine erste Einheit ein – am schnellsten mit einem Foto vom Gerätedisplay." />
