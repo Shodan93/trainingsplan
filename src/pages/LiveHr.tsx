@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
-import { getSettings } from '../lib/db'
-import { CardioSession } from '../lib/types'
+import { getSettings, getCardioSessions } from '../lib/db'
+import { CardioSession, CARDIO_MACHINES, cardioMachineInfo } from '../lib/types'
 import { bluetoothSupported, connectHeartRate, HrConnection } from '../lib/hr'
 import { beep, successSound } from '../lib/sound'
 import { vibrate, cls, fmtDuration } from '../lib/utils'
@@ -50,6 +50,20 @@ export default function LiveHr() {
   })
   const age = settings?.birth_year ? new Date().getFullYear() - settings.birth_year : null
   const hfMax = age ? 220 - age : null
+
+  // Trainings-Gerät: vor dem Start wählen (oder per ?machine= von der Geräte-Karte),
+  // damit die Live-Einheit direkt dem richtigen Ausdauer-Training zugeordnet ist
+  const [params] = useSearchParams()
+  const [machine, setMachine] = useState(() => params.get('machine') ?? '')
+  const { data: pastCardio } = useQuery({
+    queryKey: ['cardio', profile?.id],
+    enabled: !!profile,
+    queryFn: () => getCardioSessions(profile!.id)
+  })
+  const knownMachines = useMemo(
+    () => Array.from(new Set([...CARDIO_MACHINES.map(m => m.name), ...(pastCardio ?? []).map(s => s.machine)])),
+    [pastCardio]
+  )
 
   // Zielzone – zuletzt genutzte Zone bleibt gespeichert
   const [zone, setZone] = useState<{ min: number; max: number }>(() => {
@@ -177,6 +191,7 @@ export default function LiveHr() {
     const inPct = dur > 0 ? Math.round((inZoneMsRef.current / (dur * 1000)) * 100) : 0
     setConn('idle')
     setSaveInitial({
+      machine: machine.trim() || undefined,
       performed_at: startRef.current ? new Date(startRef.current).toISOString() : new Date().toISOString(),
       duration_seconds: Math.max(dur, 1),
       avg_hr: avg,
@@ -213,7 +228,7 @@ export default function LiveHr() {
     <div className="min-h-screen flex flex-col px-4 pt-safe pb-safe max-w-2xl mx-auto w-full">
       <div className="flex items-center justify-between py-3">
         <div>
-          <p className="font-bold">🫀 Live-Puls</p>
+          <p className="font-bold">🫀 Live-Puls{machine.trim() ? ` · ${machine.trim()}` : ''}</p>
           <p className="text-xs text-white/45">
             {conn === 'connected' ? `Verbunden: ${deviceName}` :
              conn === 'lost' ? 'Verbindung verloren' :
@@ -243,15 +258,36 @@ export default function LiveHr() {
         </div>
       ) : !running ? (
         <div className="flex-1 flex flex-col justify-center gap-4 pb-10">
+          {/* Training zuordnen: Gerät schon vor dem Start wählen */}
+          <div className="card space-y-2">
+            <p className="font-bold text-sm">Welches Training?</p>
+            <div className="flex flex-wrap gap-1.5">
+              {knownMachines.map(name => {
+                const p = cardioMachineInfo(name)
+                return (
+                  <button key={name} type="button"
+                    onClick={() => setMachine(m => m.trim().toLowerCase() === name.toLowerCase() ? '' : name)}
+                    className={cls('chip transition',
+                      machine.trim().toLowerCase() === name.toLowerCase()
+                        ? 'bg-primary/25 text-primary ring-1 ring-primary'
+                        : 'bg-white/10 text-white/60')}>
+                    {p?.icon ?? '🏷️'} {name}
+                  </button>
+                )
+              })}
+            </div>
+            <input className="input" placeholder="oder eigenes Gerät…"
+              value={machine} onChange={e => setMachine(e.target.value)} />
+          </div>
           <div className="card text-center py-8 space-y-3">
             <p className="text-5xl">🫀</p>
             <p className="font-bold text-lg">HW6 verbinden</p>
             <p className="text-sm text-white/50 px-4">
               Armband anziehen und aktivieren, dann verbinden – der Sensor taucht als
-              „HW6…“ in der Geräteliste auf.
+              „HW6…“ in der Geräteliste auf. Die Messung startet sofort.
             </p>
             <button className="btn-primary w-full !py-3 text-base" disabled={conn === 'connecting'} onClick={connect}>
-              {conn === 'connecting' ? 'Verbinde…' : '🔗 Sensor verbinden'}
+              {conn === 'connecting' ? 'Verbinde…' : '🔗 Verbinden & Training starten'}
             </button>
             {error && <p className="text-sm text-red-400 px-2">{error}</p>}
           </div>
@@ -294,7 +330,7 @@ export default function LiveHr() {
       )}
 
       {saveInitial && profile && (
-        <CardioForm uid={profile.id} initial={saveInitial}
+        <CardioForm uid={profile.id} initial={saveInitial} knownMachines={knownMachines}
           onClose={() => { setSaveInitial(null); nav('/ausdauer') }}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ['cardio'] })

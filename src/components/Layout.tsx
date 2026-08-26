@@ -90,9 +90,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       {showGymSegments && (
         <BottomBar>
           <SegmentRow>
+            {/* 5 Segmente: enger Padding, sonst ragt „Statistik" aus dem Bildschirm */}
             {GYM_SEGMENTS.map(s => (
               <Link key={s.to} to={s.to}
-                className={cls('btn flex-1 !py-2 text-sm',
+                className={cls('flex-1 min-w-0 !px-1 !py-2 text-xs whitespace-nowrap',
                   loc.pathname === s.to ? 'btn-primary' : 'btn-ghost')}>{s.label}</Link>
             ))}
           </SegmentRow>

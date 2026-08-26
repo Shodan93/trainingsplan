@@ -157,7 +157,8 @@ export default function Cardio() {
       {machinePick && byMachine[machinePick] && (
         <MachineDetail machine={machinePick} sessions={byMachine[machinePick]}
           onClose={() => setMachinePick(null)}
-          onEdit={s => { setMachinePick(null); setForm({ open: true, edit: s }) }} />
+          onEdit={s => { setMachinePick(null); setForm({ open: true, edit: s }) }}
+          onLive={() => nav(`/ausdauer/live?machine=${encodeURIComponent(machinePick)}`)} />
       )}
     </div>
   )
@@ -166,11 +167,12 @@ export default function Cardio() {
 const tipStyle = { background: '#1c2440', border: '1px solid #ffffff20', borderRadius: 12, color: '#fff', fontSize: 12 }
 
 // Progression eines Geräts: Metrik wählbar, Verlauf als Linie + alle Einheiten
-function MachineDetail({ machine, sessions, onClose, onEdit }: {
+function MachineDetail({ machine, sessions, onClose, onEdit, onLive }: {
   machine: string
   sessions: CardioSession[]
   onClose: () => void
   onEdit: (s: CardioSession) => void
+  onLive: () => void
 }) {
   const metricOptions: { key: CardioMetricKey | 'duration'; label: string }[] = [
     { key: 'duration', label: 'Dauer (min)' },
@@ -194,6 +196,9 @@ function MachineDetail({ machine, sessions, onClose, onEdit }: {
   return (
     <Modal open onClose={onClose} title={`${preset?.icon ?? '🏷️'} ${machine}`}>
       <div className="space-y-4">
+        <button className="btn w-full bg-accent/15 text-accent border border-accent/30" onClick={onLive}>
+          🫀 Live-Training an diesem Gerät starten
+        </button>
         <select className="input" value={metric} onChange={e => setMetric(e.target.value as CardioMetricKey | 'duration')}>
           {metricOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
