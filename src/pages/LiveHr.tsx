@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
@@ -6,28 +6,18 @@ import { getSettings, getCardioSessions } from '../lib/db'
 import { CardioSession, CARDIO_MACHINES, cardioMachineInfo } from '../lib/types'
 import { bluetoothSupported, connectHeartRate, HrConnection } from '../lib/hr'
 import { beep, successSound } from '../lib/sound'
-import { vibrate, cls, fmtDuration } from '../lib/utils'
+import { vibrate, cls } from '../lib/utils'
+import {
+  LiveSession, Zone, ZoneStatus, newSession, elapsedSec, pause, resume, finish,
+  addSample, liveStats, zonePresets, saveLive, loadLive, clearLive, ALERT_REPEAT_MS
+} from '../lib/liveSession'
 import CardioForm from '../components/CardioForm'
 
-// Live-Puls-Monitor für BLE-Sensoren (z. B. Coospo HW6):
-// Zielzone einstellen, großer Live-Wert, Ton + Vibration beim Verlassen/Erreichen
-// der Zone, am Ende Übernahme als Ausdauer-Einheit.
-
-type ZoneStatus = 'below' | 'in' | 'above'
-const HYST = 2                 // bpm-Hysterese gegen Ton-Geflacker an der Grenze
-const REPEAT_MS = 6000         // Erinnerungston, solange außerhalb der Zone
-
-function statusFor(bpm: number, min: number, max: number, prev: ZoneStatus | null): ZoneStatus {
-  // An den Grenzen erst nach HYST bpm umschalten, sonst piept es bei jedem Schwanken
-  if (prev === 'in') {
-    if (bpm < min - HYST) return 'below'
-    if (bpm > max + HYST) return 'above'
-    return 'in'
-  }
-  if (bpm < min) return 'below'
-  if (bpm > max) return 'above'
-  return 'in'
-}
+// Ausdauer-Tracker: Gerät wählen → Training läuft (mit oder ohne Puls-Sensor,
+// z. B. Coospo HW6) → Pause/Weiter → Zusammenfassung → als Einheit speichern.
+// Die laufende Session wird durchgehend im localStorage gesichert und nach
+// einem Reload nahtlos fortgesetzt (nur der Sensor braucht einen neuen Tap –
+// Web Bluetooth erlaubt das Verbinden ausschließlich per Nutzergeste).
 
 const STATUS_UI: Record<ZoneStatus, { color: string; label: string }> = {
   below: { color: '#3b82f6', label: 'unter der Zone – Tempo rauf' },
@@ -38,10 +28,19 @@ const STATUS_UI: Record<ZoneStatus, { color: string; label: string }> = {
 function belowSound() { beep(330, 0.15, 'sine', 0.25); setTimeout(() => beep(262, 0.2, 'sine', 0.25), 170) }
 function aboveSound() { beep(1175, 0.12, 'square', 0.18); setTimeout(() => beep(1175, 0.12, 'square', 0.18), 150); setTimeout(() => beep(1318, 0.16, 'square', 0.18), 300) }
 
-export default function LiveHr() {
+// Stoppuhr-Format: 24:27 bzw. 1:04:27
+function fmtClock(totalSec: number) {
+  const s = Math.max(0, totalSec)
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60
+  const mm = h > 0 ? String(m).padStart(2, '0') : String(m)
+  return `${h > 0 ? `${h}:` : ''}${mm}:${String(r).padStart(2, '0')}`
+}
+
+export default function LiveTracker() {
   const { profile } = useAuth()
   const nav = useNavigate()
   const qc = useQueryClient()
+  const [params] = useSearchParams()
 
   const { data: settings } = useQuery({
     queryKey: ['onboarding-settings', profile?.id],
@@ -51,10 +50,6 @@ export default function LiveHr() {
   const age = settings?.birth_year ? new Date().getFullYear() - settings.birth_year : null
   const hfMax = age ? 220 - age : null
 
-  // Trainings-Gerät: vor dem Start wählen (oder per ?machine= von der Geräte-Karte),
-  // damit die Live-Einheit direkt dem richtigen Ausdauer-Training zugeordnet ist
-  const [params] = useSearchParams()
-  const [machine, setMachine] = useState(() => params.get('machine') ?? '')
   const { data: pastCardio } = useQuery({
     queryKey: ['cardio', profile?.id],
     enabled: !!profile,
@@ -65,53 +60,78 @@ export default function LiveHr() {
     [pastCardio]
   )
 
-  // Zielzone – zuletzt genutzte Zone bleibt gespeichert
-  const [zone, setZone] = useState<{ min: number; max: number }>(() => {
+  // Laufende Session nach Reload direkt wieder aufnehmen
+  const [session, setSession] = useState<LiveSession | null>(() => loadLive())
+  const [restored] = useState(() => session != null)
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+
+  const [machine, setMachine] = useState(() => session?.machine ?? params.get('machine') ?? '')
+  const [zone, setZoneState] = useState<Zone>(() => {
+    if (session) return session.zone
     try {
       const raw = localStorage.getItem('hr-zone')
       if (raw) return JSON.parse(raw)
     } catch { /* ignore */ }
     return { min: 120, max: 150 }
   })
-  useEffect(() => { try { localStorage.setItem('hr-zone', JSON.stringify(zone)) } catch { /* ignore */ } }, [zone])
+  function setZone(z: Zone) {
+    setZoneState(z)
+    try { localStorage.setItem('hr-zone', JSON.stringify(z)) } catch { /* ignore */ }
+    setSession(s => {
+      if (!s) return s
+      const next = { ...s, zone: z }
+      saveLive(next)
+      return next
+    })
+  }
 
   const [conn, setConn] = useState<'idle' | 'connecting' | 'connected' | 'lost'>('idle')
   const [deviceName, setDeviceName] = useState('')
   const [bpm, setBpm] = useState<number | null>(null)
-  const [elapsed, setElapsed] = useState(0)
   const [soundOn, setSoundOn] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saveInitial, setSaveInitial] = useState<Partial<CardioSession> | null>(null)
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   const connRef = useRef<HrConnection | null>(null)
   const wakeRef = useRef<WakeLockSentinel | null>(null)
-  const startRef = useRef<number | null>(null)
-  const samplesRef = useRef<{ t: number; bpm: number }[]>([])
-  const statusRef = useRef<ZoneStatus | null>(null)
-  const lastAlertRef = useRef(0)
-  const inZoneMsRef = useRef(0)
-  const lastSampleRef = useRef<number | null>(null)
-  const zoneRef = useRef(zone)
   const soundRef = useRef(soundOn)
-  zoneRef.current = zone
   soundRef.current = soundOn
+  const lastAlertRef = useRef(0)
+  const tickRef = useRef(0)
 
-  const [status, setStatus] = useState<ZoneStatus | null>(null)
-  const [, forceTick] = useState(0)
+  const phase: 'setup' | 'running' | 'paused' | 'done' = session ? session.phase : 'setup'
 
-  // Laufende Uhr + Sparkline-Refresh
+  // Sekundentakt: Uhr & Sparkline aktualisieren, Session periodisch sichern
   useEffect(() => {
-    if (conn !== 'connected') return
+    if (!session) return
     const iv = setInterval(() => {
-      if (startRef.current) setElapsed(Math.round((Date.now() - startRef.current) / 1000))
-      forceTick(x => x + 1)
+      setNowMs(Date.now())
+      tickRef.current++
+      if (tickRef.current % 5 === 0 && sessionRef.current) saveLive(sessionRef.current)
     }, 1000)
     return () => clearInterval(iv)
-  }, [conn])
+    // bewusst nur an „gibt es eine Session" gekoppelt
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!session])
 
-  // Bildschirm anlassen, solange der Monitor läuft
+  // Beim Verlassen/Minimieren der Seite immer den letzten Stand sichern
   useEffect(() => {
-    if (conn !== 'connected') return
+    const persist = () => { if (sessionRef.current) saveLive(sessionRef.current) }
+    const onVis = () => { if (document.visibilityState === 'hidden') persist() }
+    window.addEventListener('pagehide', persist)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      persist()
+      window.removeEventListener('pagehide', persist)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
+
+  // Bildschirm anlassen, solange das Training läuft
+  useEffect(() => {
+    if (phase !== 'running') return
     let active = true
     const acquire = async () => {
       try {
@@ -126,213 +146,315 @@ export default function LiveHr() {
       document.removeEventListener('visibilitychange', onVis)
       wakeRef.current?.release().catch(() => { /* ignore */ })
     }
-  }, [conn])
+  }, [phase])
 
+  // Beim Unmount nur den Sensor trennen – die Session bleibt gespeichert
   useEffect(() => () => { connRef.current?.disconnect() }, [])
 
-  function onSample(v: number) {
+  const onSample = useCallback((v: number) => {
+    const s = sessionRef.current
+    if (!s || s.phase !== 'running') return
     const now = Date.now()
-    if (!startRef.current) startRef.current = now
-    samplesRef.current.push({ t: now, bpm: v })
-    if (samplesRef.current.length > 7200) samplesRef.current.shift()
-
-    const prev = statusRef.current
-    const st = statusFor(v, zoneRef.current.min, zoneRef.current.max, prev)
-
-    // Zeit in der Zone aufsummieren (Abstand zum letzten Sample, gedeckelt)
-    if (lastSampleRef.current != null && prev === 'in') {
-      inZoneMsRef.current += Math.min(now - lastSampleRef.current, 5000)
-    }
-    lastSampleRef.current = now
-
-    if (st !== prev) {
-      statusRef.current = st
-      setStatus(st)
+    const { session: next, transition } = addSample(s, v, now)
+    setSession(next)
+    setBpm(v)
+    if (transition) {
       lastAlertRef.current = now
       if (soundRef.current) {
-        if (st === 'in') { successSound(); vibrate(80) }
-        else if (st === 'below') { belowSound(); vibrate([120, 80, 120]) }
+        if (transition === 'in') { successSound(); vibrate(80) }
+        else if (transition === 'below') { belowSound(); vibrate([120, 80, 120]) }
         else { aboveSound(); vibrate([180, 80, 180, 80, 180]) }
       }
-    } else if (st !== 'in' && soundRef.current && now - lastAlertRef.current > REPEAT_MS) {
-      // Erinnerung, solange man außerhalb bleibt
+    } else if (next.lastStatus !== 'in' && soundRef.current && now - lastAlertRef.current > ALERT_REPEAT_MS) {
       lastAlertRef.current = now
-      if (st === 'below') belowSound(); else aboveSound()
+      if (next.lastStatus === 'below') belowSound(); else aboveSound()
     }
-    setBpm(v)
-  }
+  }, [])
 
-  async function connect() {
+  async function connectSensor(): Promise<boolean> {
     setError(null)
     setConn('connecting')
     try {
-      const c = await connectHeartRate(onSample, () => setConn('lost'))
+      const c = await connectHeartRate(onSample, () => { setConn('lost'); setBpm(null) })
       connRef.current = c
       setDeviceName(c.deviceName)
       setConn('connected')
-      // kurzer Bestätigungston = Audio-Kontext ist durch die Nutzergeste freigeschaltet
-      beep(880, 0.1)
+      beep(880, 0.1) // Audio-Kontext per Nutzergeste freischalten + Bestätigung
+      return true
     } catch (e) {
-      setConn(samplesRef.current.length ? 'lost' : 'idle')
+      setConn('idle')
       const msg = e instanceof Error ? e.message : ''
       if (!msg.toLowerCase().includes('cancel')) {
-        setError('Verbindung fehlgeschlagen. Ist der HW6 an, aufgeladen und nicht mit einer anderen App verbunden?')
+        setError('Sensor-Verbindung fehlgeschlagen. Ist der HW6 an, geladen und nicht mit einer anderen App verbunden?')
       }
+      return false
     }
   }
 
-  function stopAndSave() {
+  function startTraining() {
+    const s = newSession(machine.trim(), zone)
+    saveLive(s)
+    setSession(s)
+    setNowMs(Date.now())
+  }
+  async function startWithSensor() {
+    if (await connectSensor()) startTraining()
+  }
+
+  function togglePause() {
+    setSession(s => {
+      if (!s) return s
+      const next = s.phase === 'running' ? pause(s) : resume(s)
+      saveLive(next)
+      if (soundRef.current) beep(next.phase === 'paused' ? 440 : 660, 0.12)
+      return next
+    })
+  }
+
+  function finishTraining() {
     connRef.current?.disconnect()
     connRef.current = null
-    const samples = samplesRef.current
-    const dur = startRef.current ? Math.round((Date.now() - startRef.current) / 1000) : 0
-    const avg = samples.length ? Math.round(samples.reduce((a, s) => a + s.bpm, 0) / samples.length) : null
-    const max = samples.length ? Math.max(...samples.map(s => s.bpm)) : null
-    const inPct = dur > 0 ? Math.round((inZoneMsRef.current / (dur * 1000)) * 100) : 0
     setConn('idle')
-    setSaveInitial({
-      machine: machine.trim() || undefined,
-      performed_at: startRef.current ? new Date(startRef.current).toISOString() : new Date().toISOString(),
-      duration_seconds: Math.max(dur, 1),
-      avg_hr: avg,
-      max_hr: max,
-      notes: `Live-Monitor: ${inPct} % in Zone ${zone.min}–${zone.max} bpm`
+    setBpm(null)
+    setSession(s => {
+      if (!s) return s
+      const next = finish(s)
+      saveLive(next)
+      return next
+    })
+  }
+
+  // Aus der Zusammenfassung zurück ins Training (versehentlich beendet)
+  function continueTraining() {
+    setSession(s => {
+      if (!s) return s
+      const next = resume({ ...s, phase: 'paused' })
+      saveLive(next)
+      return next
     })
   }
 
   function discard() {
     connRef.current?.disconnect()
     connRef.current = null
+    clearLive()
     nav('/ausdauer')
   }
 
-  const running = conn === 'connected' || conn === 'lost'
-  const ui = status ? STATUS_UI[status] : null
-  const avg = samplesRef.current.length
-    ? Math.round(samplesRef.current.reduce((a, s) => a + s.bpm, 0) / samplesRef.current.length) : null
-  const maxBpm = samplesRef.current.length ? Math.max(...samplesRef.current.map(s => s.bpm)) : null
-  const inPct = elapsed > 0 ? Math.round((inZoneMsRef.current / (elapsed * 1000)) * 100) : 0
+  function openSaveForm() {
+    const s = sessionRef.current
+    if (!s) return
+    const stats = liveStats(s)
+    const hasHr = s.samples.length > 0
+    setSaveInitial({
+      machine: s.machine || undefined,
+      performed_at: new Date(s.startedAt).toISOString(),
+      duration_seconds: Math.max(stats.durationSec, 1),
+      avg_hr: stats.avgHr,
+      max_hr: stats.maxHr,
+      notes: hasHr ? `Live-Tracker: ${stats.inZonePct} % in Zone ${s.zone.min}–${s.zone.max} bpm` : null
+    })
+  }
 
-  // Zonen-Presets aus dem Alter (220 − Alter), sonst generische Bereiche
-  const presets = useMemo(() => {
-    const base = hfMax ?? 190
-    const mk = (lo: number, hi: number) => ({ min: Math.round(base * lo), max: Math.round(base * hi) })
-    return [
-      { label: 'GA1 · locker', ...mk(0.6, 0.7) },
-      { label: 'GA2 · zügig', ...mk(0.7, 0.8) },
-      { label: 'Schwelle', ...mk(0.8, 0.9) }
-    ]
-  }, [hfMax])
+  const presets = useMemo(() => zonePresets(hfMax), [hfMax])
+  const stats = session ? liveStats(session, nowMs) : null
+  const ui = session?.lastStatus && conn === 'connected' ? STATUS_UI[session.lastStatus] : null
+  const btSupported = bluetoothSupported()
 
   return (
     <div className="min-h-screen flex flex-col px-4 pt-safe pb-safe max-w-2xl mx-auto w-full">
+      {/* Kopfzeile */}
       <div className="flex items-center justify-between py-3">
-        <div>
-          <p className="font-bold">🫀 Live-Puls{machine.trim() ? ` · ${machine.trim()}` : ''}</p>
+        <div className="min-w-0">
+          <p className="font-bold truncate">
+            {phase === 'setup' ? '🏃 Neues Ausdauer-Training'
+              : `${cardioMachineInfo(session!.machine)?.icon ?? '🏃'} ${session!.machine || 'Training'}`}
+          </p>
           <p className="text-xs text-white/45">
-            {conn === 'connected' ? `Verbunden: ${deviceName}` :
-             conn === 'lost' ? 'Verbindung verloren' :
-             conn === 'connecting' ? 'Verbinde…' : 'Nicht verbunden'}
+            {phase === 'setup' ? 'Gerät wählen und starten'
+              : conn === 'connected' ? `Sensor: ${deviceName}`
+              : conn === 'connecting' ? 'Verbinde Sensor…'
+              : conn === 'lost' ? 'Sensor-Verbindung verloren'
+              : 'Ohne Puls-Sensor'}
           </p>
         </div>
-        <div className="flex gap-2">
-          {running && (
+        <div className="flex gap-2 shrink-0">
+          {session && (
             <button className="btn-ghost !px-3" onClick={() => setSoundOn(s => !s)} title="Ton an/aus">
               {soundOn ? '🔊' : '🔇'}
             </button>
           )}
           <button className="btn-ghost !px-3" onClick={() => {
-            if (!running || samplesRef.current.length === 0 || confirm('Live-Monitor beenden ohne zu speichern?')) discard()
+            if (!session) { nav('/ausdauer'); return }
+            if (confirm('Training abbrechen und verwerfen?')) discard()
           }}>✕</button>
         </div>
       </div>
 
-      {!bluetoothSupported() ? (
-        <div className="card text-center py-10 space-y-2">
-          <p className="text-4xl">🚫</p>
-          <p className="font-semibold">Web Bluetooth wird hier nicht unterstützt</p>
-          <p className="text-sm text-white/50">
-            Öffne die App in <b>Chrome auf Android</b> (oder Chrome/Edge am Desktop).
-            iOS-Safari unterstützt kein Web Bluetooth.
-          </p>
-        </div>
-      ) : !running ? (
-        <div className="flex-1 flex flex-col justify-center gap-4 pb-10">
-          {/* Training zuordnen: Gerät schon vor dem Start wählen */}
+      {/* ---- Phase: Setup ---- */}
+      {phase === 'setup' && (
+        <div className="flex-1 flex flex-col gap-4 pb-6">
           <div className="card space-y-2">
-            <p className="font-bold text-sm">Welches Training?</p>
+            <p className="font-bold text-sm">1 · Welches Gerät?</p>
             <div className="flex flex-wrap gap-1.5">
               {knownMachines.map(name => {
                 const p = cardioMachineInfo(name)
+                const active = machine.trim().toLowerCase() === name.toLowerCase()
                 return (
                   <button key={name} type="button"
-                    onClick={() => setMachine(m => m.trim().toLowerCase() === name.toLowerCase() ? '' : name)}
+                    onClick={() => setMachine(active ? '' : name)}
                     className={cls('chip transition',
-                      machine.trim().toLowerCase() === name.toLowerCase()
-                        ? 'bg-primary/25 text-primary ring-1 ring-primary'
-                        : 'bg-white/10 text-white/60')}>
+                      active ? 'bg-primary/25 text-primary ring-1 ring-primary' : 'bg-white/10 text-white/60')}>
                     {p?.icon ?? '🏷️'} {name}
                   </button>
                 )
               })}
             </div>
-            <input className="input" placeholder="oder eigenes Gerät…"
+            <input className="input" placeholder="oder eigenes Gerät, z. B. „Laufband Studio 2“"
               value={machine} onChange={e => setMachine(e.target.value)} />
           </div>
-          <div className="card text-center py-8 space-y-3">
-            <p className="text-5xl">🫀</p>
-            <p className="font-bold text-lg">HW6 verbinden</p>
-            <p className="text-sm text-white/50 px-4">
-              Armband anziehen und aktivieren, dann verbinden – der Sensor taucht als
-              „HW6…“ in der Geräteliste auf. Die Messung startet sofort.
+
+          <div className="card space-y-2">
+            <p className="font-bold text-sm">2 · Zielzone (Puls)</p>
+            <ZoneFields zone={zone} setZone={setZone} presets={presets} hfMax={hfMax} />
+            <p className="text-[11px] text-white/35">
+              Mit Sensor bekommst du Ton + Vibration, sobald du die Zone verlässt oder erreichst.
             </p>
-            <button className="btn-primary w-full !py-3 text-base" disabled={conn === 'connecting'} onClick={connect}>
-              {conn === 'connecting' ? 'Verbinde…' : '🔗 Verbinden & Training starten'}
-            </button>
-            {error && <p className="text-sm text-red-400 px-2">{error}</p>}
           </div>
-          <ZoneEditor zone={zone} setZone={setZone} presets={presets} hfMax={hfMax} />
+
+          <div className="card space-y-2">
+            <p className="font-bold text-sm">3 · Los geht's</p>
+            {btSupported && (
+              <button className="btn-primary w-full !py-3 text-base"
+                disabled={!machine.trim() || conn === 'connecting'} onClick={startWithSensor}>
+                {conn === 'connecting' ? 'Verbinde…' : '🫀 Mit Puls-Sensor starten (HW6)'}
+              </button>
+            )}
+            <button className={cls('w-full !py-3 text-base', btSupported ? 'btn-ghost' : 'btn-primary')}
+              disabled={!machine.trim()} onClick={startTraining}>
+              ▶️ {btSupported ? 'Ohne Sensor starten' : 'Training starten'}
+            </button>
+            {!machine.trim() && <p className="text-[11px] text-white/35 text-center">Wähle zuerst ein Gerät.</p>}
+            {!btSupported && (
+              <p className="text-[11px] text-white/35">
+                Puls-Sensor braucht Chrome auf Android bzw. Chrome/Edge am Desktop (iOS-Safari kann kein Web Bluetooth).
+              </p>
+            )}
+            {error && <p className="text-sm text-red-400">{error}</p>}
+          </div>
         </div>
-      ) : (
-        <div className="flex-1 flex flex-col gap-4">
-          {conn === 'lost' && (
-            <button className="card w-full text-center border-red-400/40 bg-red-400/10 text-red-300 font-semibold" onClick={connect}>
-              ⚠️ Verbindung verloren – erneut verbinden
+      )}
+
+      {/* ---- Phase: Training läuft / Pause ---- */}
+      {(phase === 'running' || phase === 'paused') && session && stats && (
+        <div className="flex-1 flex flex-col gap-3 pb-4">
+          {/* Sensor nach Reload/Abbruch mit einem Tap wieder verbinden */}
+          {btSupported && conn !== 'connected' && conn !== 'connecting' && (
+            <button onClick={connectSensor}
+              className={cls('card w-full text-center font-semibold',
+                conn === 'lost' || restored
+                  ? 'border-red-400/40 bg-red-400/10 text-red-300'
+                  : 'border-accent/40 bg-accent/10 text-accent')}>
+              {conn === 'lost' ? '⚠️ Sensor-Verbindung verloren – neu verbinden'
+                : restored ? '🫀 Training läuft weiter – Sensor neu verbinden'
+                : '🫀 Puls-Sensor verbinden (optional)'}
             </button>
           )}
+          {error && <p className="text-sm text-red-400 text-center">{error}</p>}
 
-          <div className="text-center py-6 rounded-3xl transition-colors duration-500"
-            style={{ background: ui ? `${ui.color}1a` : 'rgba(255,255,255,.04)', border: `1px solid ${ui ? `${ui.color}55` : 'rgba(255,255,255,.08)'}` }}>
-            <p className="text-[88px] leading-none font-extrabold tabular-nums" style={{ color: ui?.color ?? '#fff' }}>
-              {bpm ?? '–'}
+          {/* Stoppuhr */}
+          <div className={cls('text-center py-5 rounded-3xl border transition-colors',
+            phase === 'paused' ? 'border-amber-400/40 bg-amber-400/10' : 'border-white/10 bg-white/5')}>
+            <p className="text-6xl font-extrabold tabular-nums leading-none">{fmtClock(stats.durationSec)}</p>
+            <p className="text-xs text-white/50 mt-2">
+              {phase === 'paused' ? '⏸ Pause – Uhr angehalten' : `gestartet ${new Date(session.startedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`}
             </p>
-            <p className="text-sm text-white/60 mt-1">bpm</p>
-            {ui && <p className="text-sm font-semibold mt-2" style={{ color: ui.color }}>{ui.label}</p>}
           </div>
 
-          <Sparkline samples={samplesRef.current} zone={zone} />
+          {/* Live-Puls */}
+          {conn === 'connected' && (
+            <div className="text-center py-5 rounded-3xl transition-colors duration-500"
+              style={{ background: ui ? `${ui.color}1a` : 'rgba(255,255,255,.04)', border: `1px solid ${ui ? `${ui.color}55` : 'rgba(255,255,255,.08)'}` }}>
+              <p className="text-[72px] leading-none font-extrabold tabular-nums" style={{ color: ui?.color ?? '#fff' }}>
+                {bpm ?? '–'}
+              </p>
+              <p className="text-sm text-white/60 mt-1">bpm</p>
+              {ui && <p className="text-sm font-semibold mt-1" style={{ color: ui.color }}>{ui.label}</p>}
+            </div>
+          )}
+
+          <Sparkline samples={session.samples} zone={session.zone} />
 
           <div className="grid grid-cols-4 gap-2 text-center">
-            <MiniStat label="Zeit" value={fmtDuration(elapsed)} />
-            <MiniStat label="Ø Puls" value={avg != null ? `${avg}` : '–'} />
-            <MiniStat label="Max" value={maxBpm != null ? `${maxBpm}` : '–'} />
-            <MiniStat label="in Zone" value={`${inPct} %`} />
+            <MiniStat label="Ø Puls" value={stats.avgHr != null ? `${stats.avgHr}` : '–'} />
+            <MiniStat label="Max" value={stats.maxHr != null ? `${stats.maxHr}` : '–'} />
+            <MiniStat label="in Zone" value={session.samples.length ? `${stats.inZonePct} %` : '–'} />
+            <MiniStat label="Zone" value={`${session.zone.min}–${session.zone.max}`} />
           </div>
 
-          <ZoneEditor zone={zone} setZone={setZone} presets={presets} hfMax={hfMax} />
+          <details className="card !py-3">
+            <summary className="font-bold text-sm cursor-pointer select-none">Zielzone anpassen</summary>
+            <div className="pt-3">
+              <ZoneFields zone={zone} setZone={setZone} presets={presets} hfMax={hfMax} />
+            </div>
+          </details>
 
-          <div className="mt-auto pb-4">
-            <button className="btn-primary w-full !py-3 text-base" onClick={stopAndSave}>
-              ⏹ Beenden & als Einheit speichern
+          <div className="mt-auto grid grid-cols-2 gap-2 pb-2">
+            <button className="btn-ghost !py-3 text-base" onClick={togglePause}>
+              {phase === 'paused' ? '▶️ Weiter' : '⏸ Pause'}
             </button>
+            <button className="btn-primary !py-3 text-base" onClick={finishTraining}>
+              ⏹ Beenden
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Phase: Zusammenfassung ---- */}
+      {phase === 'done' && session && stats && (
+        <div className="flex-1 flex flex-col gap-4 pb-6">
+          <div className="card text-center py-6 space-y-1">
+            <p className="text-4xl">🎉</p>
+            <p className="font-bold text-lg">{session.machine || 'Training'} beendet</p>
+            <p className="text-5xl font-extrabold tabular-nums py-2">{fmtClock(stats.durationSec)}</p>
+            <p className="text-xs text-white/45">
+              gestartet {new Date(session.startedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
+            </p>
+          </div>
+
+          {session.samples.length > 0 && (
+            <>
+              <Sparkline samples={session.samples} zone={session.zone} />
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <MiniStat label="Ø Puls" value={`${stats.avgHr}`} />
+                <MiniStat label="Max. Puls" value={`${stats.maxHr}`} />
+                <MiniStat label={`in Zone ${session.zone.min}–${session.zone.max}`} value={`${stats.inZonePct} %`} />
+              </div>
+            </>
+          )}
+
+          <div className="space-y-2 mt-auto pb-2">
+            <button className="btn-primary w-full !py-3 text-base" onClick={openSaveForm}>
+              💾 Als Ausdauer-Einheit speichern
+            </button>
+            <p className="text-[11px] text-white/35 text-center">
+              Im nächsten Schritt kannst du Werte vom Gerätedisplay ergänzen – auch per 📷 Foto.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button className="btn-ghost" onClick={continueTraining}>↩︎ Weiter trainieren</button>
+              <button className="btn-ghost text-red-300" onClick={() => { if (confirm('Training wirklich verwerfen?')) discard() }}>
+                Verwerfen
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {saveInitial && profile && (
         <CardioForm uid={profile.id} initial={saveInitial} knownMachines={knownMachines}
-          onClose={() => { setSaveInitial(null); nav('/ausdauer') }}
+          onClose={() => setSaveInitial(null)}
           onSaved={() => {
+            clearLive()
             qc.invalidateQueries({ queryKey: ['cardio'] })
             qc.invalidateQueries({ queryKey: ['history'] })
             setSaveInitial(null)
@@ -345,28 +467,24 @@ export default function LiveHr() {
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white/5 rounded-xl py-2">
+    <div className="bg-white/5 rounded-xl py-2 px-1">
       <p className="text-base font-extrabold leading-tight">{value}</p>
       <p className="text-[10px] text-white/45">{label}</p>
     </div>
   )
 }
 
-function ZoneEditor({ zone, setZone, presets, hfMax }: {
-  zone: { min: number; max: number }
-  setZone: (z: { min: number; max: number }) => void
+function ZoneFields({ zone, setZone, presets, hfMax }: {
+  zone: Zone
+  setZone: (z: Zone) => void
   presets: { label: string; min: number; max: number }[]
   hfMax: number | null
 }) {
   return (
-    <div className="card space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="font-bold text-sm">Zielzone</p>
-        {hfMax && <p className="text-[11px] text-white/40">HFmax ≈ {hfMax} (220 − Alter)</p>}
-      </div>
+    <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
         {presets.map(p => (
-          <button key={p.label}
+          <button key={p.label} type="button"
             onClick={() => setZone({ min: p.min, max: p.max })}
             className={cls('chip transition',
               zone.min === p.min && zone.max === p.max
@@ -387,12 +505,13 @@ function ZoneEditor({ zone, setZone, presets, hfMax }: {
             onChange={e => setZone({ ...zone, max: Number(e.target.value) || 0 })} />
         </div>
       </div>
+      {hfMax && <p className="text-[11px] text-white/40">HFmax ≈ {hfMax} (220 − Alter)</p>}
     </div>
   )
 }
 
-// Verlauf der letzten ~3 Minuten als leichte SVG-Linie mit Zonen-Band
-function Sparkline({ samples, zone }: { samples: { t: number; bpm: number }[]; zone: { min: number; max: number } }) {
+// Pulsverlauf der letzten ~3 Minuten als leichte SVG-Linie mit Zonen-Band
+function Sparkline({ samples, zone }: { samples: { t: number; bpm: number }[]; zone: Zone }) {
   const recent = samples.slice(-180)
   if (recent.length < 2) return null
   const W = 300, H = 80

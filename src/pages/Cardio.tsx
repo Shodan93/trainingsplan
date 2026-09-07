@@ -1,35 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid
 } from 'recharts'
 import { useAuth } from '../lib/auth'
 import { getCardioSessions } from '../lib/db'
 import { CardioSession, CardioMetricKey, CARDIO_METRICS, cardioMachineInfo } from '../lib/types'
-import { PageSkeleton, EmptyState, Modal, Stat } from '../components/ui'
+import { primaryMetric, machineTrend, weeklyCardio } from '../lib/cardio'
+import { loadLive, elapsedSec, LiveSession } from '../lib/liveSession'
+import { PageSkeleton, EmptyState, Modal } from '../components/ui'
 import CardioForm, { CardioEntryRow } from '../components/CardioForm'
 import { fmtDate, fmtDuration, cls } from '../lib/utils'
 
-// Kumulative Werte (mehr in gleicher Zeit = Fortschritt) vs. Intensitätswerte
-const CUMULATIVE: CardioMetricKey[] = ['floors', 'distance_km', 'calories']
-
-// Leit-Metrik eines Geräts: Vorlage, sonst erstes Feld mit Daten
-function primaryMetric(machine: string, sessions: CardioSession[]): CardioMetricKey | null {
-  const preset = cardioMachineInfo(machine)
-  const has = (k: CardioMetricKey) => sessions.some(s => s[k] != null)
-  if (preset && has(preset.primary)) return preset.primary
-  return (Object.keys(CARDIO_METRICS) as CardioMetricKey[]).find(has) ?? null
-}
-
-// Vergleichswert für die Progression: kumulative Metriken pro Minute,
-// Intensitätswerte absolut
-function progressValue(s: CardioSession, k: CardioMetricKey): number | null {
-  const v = s[k]
-  if (v == null) return null
-  if (CUMULATIVE.includes(k)) return s.duration_seconds > 0 ? Number(v) / (s.duration_seconds / 60) : null
-  return Number(v)
-}
+// Ausdauer-Hub: Training starten/fortsetzen, Wochenbilanz, Progression pro
+// Gerät und die letzten Einheiten – Erfassung manuell oder per Display-Foto.
 
 export default function Cardio() {
   const { profile } = useAuth()
@@ -37,6 +22,18 @@ export default function Cardio() {
   const nav = useNavigate()
   const [form, setForm] = useState<{ open: boolean; edit: CardioSession | null }>({ open: false, edit: null })
   const [machinePick, setMachinePick] = useState<string | null>(null)
+
+  // Läuft gerade ein Live-Training? (übersteht Reload – liegt im localStorage)
+  const [live, setLive] = useState<LiveSession | null>(() => loadLive())
+  useEffect(() => {
+    const check = () => setLive(loadLive())
+    window.addEventListener('focus', check)
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      window.removeEventListener('focus', check)
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [])
 
   const { data: sessions, isLoading } = useQuery({
     queryKey: ['cardio', profile?.id],
@@ -48,10 +45,13 @@ export default function Cardio() {
   const byMachine = useMemo(() => {
     const m: Record<string, CardioSession[]> = {}
     all.forEach(s => { (m[s.machine] ??= []).push(s) })
-    // pro Gerät neueste zuerst (kommt sortiert aus der DB, zur Sicherheit)
     Object.values(m).forEach(list => list.sort((a, b) => b.performed_at.localeCompare(a.performed_at)))
     return m
   }, [all])
+
+  const weeks = useMemo(() => weeklyCardio(all, 8), [all])
+  const thisWeek = weeks[weeks.length - 1]
+  const lastWeek = weeks[weeks.length - 2]
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['cardio'] })
@@ -61,16 +61,11 @@ export default function Cardio() {
 
   if (isLoading) return <PageSkeleton rows={4} />
 
-  const totalMin = Math.round(all.reduce((a, s) => a + s.duration_seconds, 0) / 60)
-  const totalKcal = all.reduce((a, s) => a + (s.calories ?? 0), 0)
-  const thisWeekStart = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); d.setHours(0, 0, 0, 0); return d })()
-  const thisWeek = all.filter(s => new Date(s.performed_at) >= thisWeekStart).length
-
   return (
     <div className="space-y-4 py-2">
       <div className="flex items-center justify-between pt-2">
         <h1 className="text-2xl font-bold">Ausdauer</h1>
-        <button className="btn-primary" onClick={() => setForm({ open: true, edit: null })}>＋ Eintragen</button>
+        <button className="btn-ghost" onClick={() => setForm({ open: true, edit: null })}>＋ Nachtragen</button>
       </div>
 
       {/* Gegenstück zum Kraft-Bereich: gleiche Umschaltung wie auf „Training starten" */}
@@ -79,72 +74,107 @@ export default function Cardio() {
         <button className="btn-primary flex-1 !py-2 text-sm">🏃 Ausdauer</button>
       </div>
 
-      <p className="text-sm text-white/50">Cardio pro Gerät tracken – manuell oder per Foto vom Display.</p>
+      {/* Start / Fortsetzen */}
+      {live ? (
+        <button onClick={() => nav('/ausdauer/live')}
+          className="card w-full text-left border-accent/40 bg-accent/10 flex items-center justify-between active:scale-[0.99]">
+          <div>
+            <p className="font-semibold text-accent">
+              {live.phase === 'paused' ? '⏸' : '🟢'} Laufendes Training fortsetzen
+            </p>
+            <p className="text-xs text-white/55 mt-0.5">
+              {cardioMachineInfo(live.machine)?.icon ?? '🏃'} {live.machine || 'Training'} · {fmtDuration(elapsedSec(live))}
+              {live.phase === 'paused' && ' · pausiert'}
+            </p>
+          </div>
+          <span className="text-xl text-white/40">›</span>
+        </button>
+      ) : (
+        <button onClick={() => nav('/ausdauer/live')}
+          className="btn-primary w-full !py-4 text-base !rounded-2xl">
+          ▶️ Training starten
+        </button>
+      )}
 
-      {/* Live-Monitoring mit BLE-Pulssensor (z. B. Coospo HW6) */}
-      <button onClick={() => nav('/ausdauer/live')}
-        className="card w-full text-left border-accent/40 bg-accent/10 flex items-center justify-between active:scale-[0.99]">
-        <div>
-          <p className="font-semibold text-accent">🫀 Live-Puls mit Zielzone</p>
-          <p className="text-xs text-white/55 mt-0.5">HW6 verbinden · Ton-Feedback, wenn du die Zone verlässt</p>
-        </div>
-        <span className="text-xl text-white/40">›</span>
-      </button>
-
-      {!all.length ? (
+      {!all.length && !live ? (
         <EmptyState icon="🏃" title="Noch keine Ausdauer-Einheiten"
-          hint="Trage deine erste Einheit ein – am schnellsten mit einem Foto vom Gerätedisplay." />
+          hint="Starte dein erstes Training – mit Live-Puls (HW6) oder einfach mit der Stoppuhr. Vergangene Einheiten kannst du oben nachtragen." />
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-3">
-            <Stat icon="🔁" value={thisWeek} label="diese Woche" color="#22c55e" />
-            <Stat icon="⏱️" value={`${totalMin} min`} label="gesamt" color="#a855f7" />
-            <Stat icon="🔥" value={totalKcal.toLocaleString('de-DE')} label="kcal gesamt" color="#f59e0b" />
+          {/* Wochenbilanz mit Vergleich zur Vorwoche */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-bold text-sm">Diese Woche</p>
+              {lastWeek && <p className="text-[11px] text-white/40">Vorwoche: {lastWeek.minutes} min · {lastWeek.count}×</p>}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <WeekStat value={`${thisWeek?.minutes ?? 0}`} unit="min" delta={delta(thisWeek?.minutes, lastWeek?.minutes)} />
+              <WeekStat value={`${thisWeek?.count ?? 0}`} unit="Einheiten" delta={delta(thisWeek?.count, lastWeek?.count)} />
+              <WeekStat value={`${Math.round(thisWeek?.kcal ?? 0).toLocaleString('de-DE')}`} unit="kcal" delta={delta(thisWeek?.kcal, lastWeek?.kcal)} />
+            </div>
           </div>
 
-          <p className="text-sm font-bold px-1">Deine Geräte</p>
-          <div className="space-y-2">
-            {Object.entries(byMachine).map(([machine, list]) => {
-              const preset = cardioMachineInfo(machine)
-              const pm = primaryMetric(machine, list)
-              const last = list[0]
-              // Trend: letzte vs. vorletzte Einheit auf der Leit-Metrik
-              let trend: { pct: number; up: boolean } | null = null
-              if (pm && list.length >= 2) {
-                const [a, b] = [progressValue(list[0], pm), progressValue(list[1], pm)]
-                if (a != null && b != null && b !== 0) {
-                  const pct = ((a - b) / b) * 100
-                  trend = { pct: Math.abs(pct), up: pct >= 0 }
-                }
-              }
-              return (
-                <button key={machine} onClick={() => setMachinePick(machine)}
-                  className="card w-full text-left flex items-center gap-3 active:scale-[0.99]">
-                  <span className="text-3xl">{preset?.icon ?? '🏷️'}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold truncate">{machine}</p>
-                    <p className="text-xs text-white/45 mt-0.5">
-                      {list.length}× · zuletzt {fmtDate(last.performed_at)} · {fmtDuration(last.duration_seconds)}
-                      {pm && last[pm] != null && <> · {Number(last[pm]).toLocaleString('de-DE')} {CARDIO_METRICS[pm].unit || CARDIO_METRICS[pm].label}</>}
-                    </p>
-                  </div>
-                  {trend && (
-                    <span className={cls('text-xs font-bold shrink-0', trend.up ? 'text-green-400' : 'text-red-400')}>
-                      {trend.up ? '▲' : '▼'} {trend.pct.toFixed(0)} %
-                    </span>
-                  )}
-                  <span className="text-xl text-white/40 shrink-0">›</span>
-                </button>
-              )
-            })}
-          </div>
+          {/* Minuten pro Woche */}
+          {weeks.some(w => w.minutes > 0) && (
+            <div className="card">
+              <p className="font-bold mb-3 text-sm">Minuten pro Woche</p>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={weeks.map(w => ({ ...w, label: fmtDate(w.week).slice(0, 5) }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: '#ffffff60', fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fill: '#ffffff60', fontSize: 11 }} width={32} />
+                  <Tooltip contentStyle={tipStyle} cursor={{ fill: '#ffffff08' }} />
+                  <Bar dataKey="minutes" name="Minuten" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
-          <p className="text-sm font-bold px-1">Letzte Einheiten</p>
-          <div className="space-y-2">
-            {all.slice(0, 8).map(s => (
-              <CardioEntryRow key={s.id} s={s} onClick={() => setForm({ open: true, edit: s })} />
-            ))}
-          </div>
+          {/* Geräte mit Progression */}
+          {Object.keys(byMachine).length > 0 && (
+            <>
+              <p className="text-sm font-bold px-1">Deine Geräte</p>
+              <div className="space-y-2">
+                {Object.entries(byMachine).map(([machine, list]) => {
+                  const preset = cardioMachineInfo(machine)
+                  const pm = primaryMetric(machine, list)
+                  const last = list[0]
+                  const trend = machineTrend(machine, list)
+                  return (
+                    <button key={machine} onClick={() => setMachinePick(machine)}
+                      className="card w-full text-left flex items-center gap-3 active:scale-[0.99]">
+                      <span className="text-3xl">{preset?.icon ?? '🏷️'}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold truncate">{machine}</p>
+                        <p className="text-xs text-white/45 mt-0.5">
+                          {list.length}× · zuletzt {fmtDate(last.performed_at)} · {fmtDuration(last.duration_seconds)}
+                          {pm && last[pm] != null && <> · {Number(last[pm]).toLocaleString('de-DE')} {CARDIO_METRICS[pm].unit || CARDIO_METRICS[pm].label}</>}
+                        </p>
+                      </div>
+                      {trend && (
+                        <span className={cls('text-xs font-bold shrink-0', trend.up ? 'text-green-400' : 'text-red-400')}>
+                          {trend.up ? '▲' : '▼'} {trend.pct.toFixed(0)} %
+                        </span>
+                      )}
+                      <span className="text-xl text-white/40 shrink-0">›</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Letzte Einheiten */}
+          {all.length > 0 && (
+            <>
+              <p className="text-sm font-bold px-1">Letzte Einheiten</p>
+              <div className="space-y-2">
+                {all.slice(0, 10).map(s => (
+                  <CardioEntryRow key={s.id} s={s} onClick={() => setForm({ open: true, edit: s })} />
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -159,6 +189,25 @@ export default function Cardio() {
           onClose={() => setMachinePick(null)}
           onEdit={s => { setMachinePick(null); setForm({ open: true, edit: s }) }}
           onLive={() => nav(`/ausdauer/live?machine=${encodeURIComponent(machinePick)}`)} />
+      )}
+    </div>
+  )
+}
+
+function delta(cur?: number, prev?: number): number | null {
+  if (cur == null || prev == null || prev === 0) return null
+  return Math.round(((cur - prev) / prev) * 100)
+}
+
+function WeekStat({ value, unit, delta }: { value: string; unit: string; delta: number | null }) {
+  return (
+    <div className="bg-white/5 rounded-xl py-3 px-1">
+      <p className="text-xl font-extrabold leading-none">{value}</p>
+      <p className="text-[10px] text-white/45 mt-1">{unit}</p>
+      {delta != null && (
+        <p className={cls('text-[10px] font-bold mt-0.5', delta >= 0 ? 'text-green-400' : 'text-red-400')}>
+          {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)} %
+        </p>
       )}
     </div>
   )
@@ -197,7 +246,7 @@ function MachineDetail({ machine, sessions, onClose, onEdit, onLive }: {
     <Modal open onClose={onClose} title={`${preset?.icon ?? '🏷️'} ${machine}`}>
       <div className="space-y-4">
         <button className="btn w-full bg-accent/15 text-accent border border-accent/30" onClick={onLive}>
-          🫀 Live-Training an diesem Gerät starten
+          ▶️ Training an diesem Gerät starten
         </button>
         <select className="input" value={metric} onChange={e => setMetric(e.target.value as CardioMetricKey | 'duration')}>
           {metricOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
